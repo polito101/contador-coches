@@ -18,6 +18,21 @@ pip install -r requirements.txt
 
 La primera ejecución descarga el modelo YOLO (~6 MB) automáticamente.
 
+### GPU NVIDIA (opcional, ~10x más rápido)
+
+`pip install -r requirements.txt` instala torch en CPU. Para usar tu GPU:
+
+```powershell
+.\.venv\Scripts\pip.exe uninstall -y torch torchvision
+.\.venv\Scripts\pip.exe install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+Verifica con:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available())"
+```
+
 ## Uso
 
 ```powershell
@@ -41,21 +56,45 @@ Pulsa `q` mientras corre para terminar antes.
 
 ### Flags
 
-| Flag           | Default        | Descripción                                            |
-|----------------|----------------|--------------------------------------------------------|
-| `--source`     | (obligatorio)  | URL/path/índice de webcam                              |
-| `--duration`   | `30`           | Segundos a procesar                                    |
-| `--conf`       | `0.5`          | Confianza mínima de detección (0..1)                   |
-| `--min-frames` | `5`            | Frames mínimos para contar un track                    |
-| `--model`      | `yolov8n.pt`   | Pesos del modelo (`yolov8s.pt` más preciso, más lento) |
-| `--output-dir` | `output`       | Carpeta de salida                                      |
-| `--no-save`    | off            | No guardar vídeo ni JSON                               |
-| `--no-display` | off            | No abrir ventana (headless)                            |
+| Flag              | Default        | Descripción                                                              |
+|-------------------|----------------|--------------------------------------------------------------------------|
+| `--source`        | (obligatorio)  | URL/path/índice de webcam                                                |
+| `--duration`      | `30`           | Segundos a procesar                                                      |
+| `--conf`          | `0.5`          | Confianza mínima de detección (0..1)                                     |
+| `--min-frames`    | `5`            | Frames mínimos para contar un track (modo sin línea)                     |
+| `--line-y`        | `None`         | Píxel Y de la línea horizontal de conteo. Activa modo línea + dirección. |
+| `--line-x`        | `None`         | Píxel X de la línea vertical. Mutuamente excluyente con `--line-y`.      |
+| `--preview-frame` | off            | Guarda el primer frame como PNG y sale. Usar para elegir `--line-y/x`.   |
+| `--model`         | `yolov8n.pt`   | Pesos del modelo (`yolov8s.pt` más preciso, más lento)                   |
+| `--output-dir`    | `output`       | Carpeta de salida                                                        |
+| `--no-save`       | off            | No guardar vídeo ni JSON                                                 |
+| `--no-display`    | off            | No abrir ventana (headless)                                              |
 
-### Ajustando precisión
+### Modos de conteo
 
-- Si cuenta **demasiados** (señales detectadas como coches, mismo coche dos veces): subir `--conf 0.6` y/o `--min-frames 10`.
-- Si cuenta **muy pocos** (coches reales ignorados): bajar `--conf 0.4` y/o `--min-frames 3`.
+**Sin línea (default):** cuenta IDs únicos del tracker. Usa `--conf` y `--min-frames` para filtrar falsos positivos.
+
+**Con línea (`--line-y` o `--line-x`):** solo cuenta vehículos que cruzan una línea virtual. Mucho más preciso y reporta dirección.
+
+Para elegir el píxel de la línea:
+
+```powershell
+# 1. Guarda el primer frame
+.\.venv\Scripts\python.exe contar.py --source "URL" --preview-frame
+
+# 2. Abre output/preview_*.png, mira el píxel Y o X donde quieres la línea
+# 3. Vuelve a lanzar con esa coordenada
+.\.venv\Scripts\python.exe contar.py --source "URL" --line-y 400 --duration 30
+```
+
+La salida en modo línea desglosa por dirección:
+- `--line-y`: `down` (de arriba a abajo) y `up` (al revés)
+- `--line-x`: `right` (de izquierda a derecha) y `left` (al revés)
+
+### Ajustando precisión (modo sin línea)
+
+- Si cuenta **demasiados**: subir `--conf 0.6` y/o `--min-frames 10`.
+- Si cuenta **muy pocos**: bajar `--conf 0.4` y/o `--min-frames 3`.
 
 ## Salida
 
