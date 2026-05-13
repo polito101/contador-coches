@@ -4,7 +4,7 @@
 # Without this, torch installs CPU-only (works but ~10x slower for YOLO).
 # If your NVIDIA driver is older, try cu124 or cu121 instead.
 opencv-python==4.10.0.84
-ultralytics==8.3.40
+ultralytics>=8.4.50
 yt-dlp>=2026.3.17
 pytest==8.3.3
 streamlink==7.0.0
