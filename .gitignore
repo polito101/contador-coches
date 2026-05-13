@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Project outputs
+output/
+
+# Models cached by ultralytics
+*.pt
+
+# OS
+Thumbs.db
+.DS_Store
