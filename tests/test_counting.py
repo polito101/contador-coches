@@ -71,15 +71,45 @@ def test_parse_args_defaults():
     assert args.output_dir == "output"
     assert args.no_save is False
     assert args.no_display is False
+    assert args.conf == 0.5
+    assert args.min_frames == 5
 
 
 def test_parse_args_overrides():
     args = parse_args([
         "--source", "rtsp://x", "--duration", "5",
         "--model", "yolov8s.pt", "--no-save", "--no-display",
+        "--conf", "0.7", "--min-frames", "10",
     ])
     assert args.source == "rtsp://x"
     assert args.duration == 5.0
     assert args.model == "yolov8s.pt"
     assert args.no_save is True
     assert args.no_display is True
+    assert args.conf == 0.7
+    assert args.min_frames == 10
+
+
+def test_counter_filters_below_min_frames():
+    c = VehicleCounter(min_frames=5)
+    # track 1: seen 5 times -> kept
+    for _ in range(5):
+        c.add(track_id=1, class_id=2)
+    # track 2: seen 4 times -> dropped
+    for _ in range(4):
+        c.add(track_id=2, class_id=2)
+    assert c.total() == 1
+    assert c.breakdown()["car"] == 1
+
+
+def test_counter_min_frames_default_keeps_everything():
+    c = VehicleCounter()  # min_frames=1
+    c.add(track_id=1, class_id=2)
+    c.add(track_id=2, class_id=2)
+    assert c.total() == 2
+
+
+def test_summary_includes_min_frames():
+    c = VehicleCounter(min_frames=3)
+    summary = c.summary(source="x", duration_real=1.0, model="m")
+    assert summary["min_frames"] == 3

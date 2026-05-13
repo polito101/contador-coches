@@ -18,34 +18,47 @@ VEHICLE_CLASSES: dict[int, str] = {
 
 
 class VehicleCounter:
-    """Tracks unique (track_id, class_id) pairs per vehicle class."""
+    """Counts unique vehicles per class, requiring a minimum number of frames
+    of presence before a track is considered a real vehicle (filters
+    ephemeral false positives like flickering detections on signs).
+    """
 
-    def __init__(self) -> None:
-        self._ids_by_class: dict[str, set[int]] = {
-            name: set() for name in VEHICLE_CLASSES.values()
+    def __init__(self, min_frames: int = 1) -> None:
+        self.min_frames = min_frames
+        self._frames_by_class: dict[str, dict[int, int]] = {
+            name: {} for name in VEHICLE_CLASSES.values()
         }
 
     def add(self, track_id: int, class_id: int) -> None:
         name = VEHICLE_CLASSES.get(class_id)
         if name is None:
             return
-        self._ids_by_class[name].add(track_id)
+        self._frames_by_class[name][track_id] = (
+            self._frames_by_class[name].get(track_id, 0) + 1
+        )
+
+    def _kept_ids(self, name: str) -> list[int]:
+        return [
+            tid for tid, n in self._frames_by_class[name].items()
+            if n >= self.min_frames
+        ]
 
     def total(self) -> int:
-        return sum(len(s) for s in self._ids_by_class.values())
+        return sum(len(self._kept_ids(n)) for n in self._frames_by_class)
 
     def breakdown(self) -> dict[str, int]:
-        return {name: len(ids) for name, ids in self._ids_by_class.items()}
+        return {n: len(self._kept_ids(n)) for n in self._frames_by_class}
 
     def summary(self, source: str, duration_real: float, model: str) -> dict:
         return {
             "source": source,
             "duration_real": duration_real,
             "model": model,
+            "min_frames": self.min_frames,
             "total": self.total(),
             "breakdown": self.breakdown(),
             "track_ids": {
-                name: sorted(ids) for name, ids in self._ids_by_class.items()
+                n: sorted(self._kept_ids(n)) for n in self._frames_by_class
             },
         }
 
@@ -68,6 +81,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Skip writing video and JSON.")
     p.add_argument("--no-display", action="store_true",
                    help="Skip opening the OpenCV window (headless mode).")
+    p.add_argument("--conf", type=float, default=0.5,
+                   help="Detection confidence threshold 0..1 (default: 0.5). "
+                        "Higher = fewer false positives.")
+    p.add_argument("--min-frames", type=int, default=5,
+                   help="Minimum frames a track must appear in to be counted "
+                        "(default: 5). Higher = filters out ephemeral re-IDs.")
     return p.parse_args(argv)
 
 
@@ -159,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         json_path = output_dir / f"{timestamp}.json"
         writer = make_writer(video_path, width, height, fps)
 
-    counter = VehicleCounter()
+    counter = VehicleCounter(min_frames=args.min_frames)
     vehicle_class_ids = list(VEHICLE_CLASSES.keys())
 
     print(f"Processing {args.duration}s from {args.source} ...")
@@ -178,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
                 frame,
                 persist=True,
                 classes=vehicle_class_ids,
+                conf=args.conf,
                 verbose=False,
             )
             r = results[0]
