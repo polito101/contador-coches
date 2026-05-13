@@ -41,3 +41,24 @@ class VehicleCounter:
                 name: sorted(ids) for name, ids in self._ids_by_class.items()
             },
         }
+
+
+import argparse
+from pathlib import Path
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Count unique vehicles in a video stream.")
+    p.add_argument("--source", required=True,
+                   help="RTSP/HTTP URL or path to a video file.")
+    p.add_argument("--duration", type=float, default=30.0,
+                   help="Seconds of video to process (default: 30).")
+    p.add_argument("--model", default="yolov8n.pt",
+                   help="Ultralytics model weights (default: yolov8n.pt).")
+    p.add_argument("--output-dir", default="output",
+                   help="Where to write annotated video + JSON (default: output).")
+    p.add_argument("--no-save", action="store_true",
+                   help="Skip writing video and JSON.")
+    p.add_argument("--no-display", action="store_true",
+                   help="Skip opening the OpenCV window (headless mode).")
+    return p.parse_args(argv)

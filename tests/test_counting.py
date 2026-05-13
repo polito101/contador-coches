@@ -58,3 +58,28 @@ def test_summary_dict_shape():
 
 def test_vehicle_classes_constant():
     assert VEHICLE_CLASSES == {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+
+
+from contar import parse_args
+
+
+def test_parse_args_defaults():
+    args = parse_args(["--source", "foo.mp4"])
+    assert args.source == "foo.mp4"
+    assert args.duration == 30.0
+    assert args.model == "yolov8n.pt"
+    assert args.output_dir == "output"
+    assert args.no_save is False
+    assert args.no_display is False
+
+
+def test_parse_args_overrides():
+    args = parse_args([
+        "--source", "rtsp://x", "--duration", "5",
+        "--model", "yolov8s.pt", "--no-save", "--no-display",
+    ])
+    assert args.source == "rtsp://x"
+    assert args.duration == 5.0
+    assert args.model == "yolov8s.pt"
+    assert args.no_save is True
+    assert args.no_display is True
