@@ -1,3 +1,8 @@
+# To install with CUDA GPU support (Windows + Python 3.13), run AFTER `pip install -r requirements.txt`:
+#   pip uninstall -y torch torchvision
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# Without this, torch installs CPU-only (works but ~10x slower for YOLO).
+# If your NVIDIA driver is older, try cu124 or cu121 instead.
 opencv-python==4.10.0.84
 ultralytics==8.3.40
 yt-dlp>=2026.3.17
