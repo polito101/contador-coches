@@ -113,3 +113,96 @@ def test_summary_includes_min_frames():
     c = VehicleCounter(min_frames=3)
     summary = c.summary(source="x", duration_real=1.0, model="m")
     assert summary["min_frames"] == 3
+
+
+from contar import LineCrossingCounter
+
+
+def test_line_y_counts_top_to_bottom_crossing():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=80)   # car above line
+    c.observe(track_id=1, class_id=2, cx=55, cy=120)  # now below -> crossed down
+    assert c.total() == 1
+    bd = c.breakdown()
+    assert bd["car"]["down"] == 1
+    assert bd["car"]["up"] == 0
+
+
+def test_line_y_counts_bottom_to_top_crossing():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=150)
+    c.observe(track_id=1, class_id=2, cx=55, cy=50)
+    assert c.total() == 1
+    assert c.breakdown()["car"]["up"] == 1
+    assert c.breakdown()["car"]["down"] == 0
+
+
+def test_line_y_no_count_when_not_crossing():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=20)
+    c.observe(track_id=1, class_id=2, cx=55, cy=30)
+    assert c.total() == 0
+
+
+def test_line_y_no_double_count_same_track():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=80)
+    c.observe(track_id=1, class_id=2, cx=55, cy=120)  # cross
+    c.observe(track_id=1, class_id=2, cx=60, cy=80)   # cross back
+    c.observe(track_id=1, class_id=2, cx=65, cy=120)  # cross again
+    # Still counted once — first crossing wins.
+    assert c.total() == 1
+
+
+def test_line_x_counts_left_to_right_crossing():
+    c = LineCrossingCounter(line_x=200)
+    c.observe(track_id=1, class_id=5, cx=180, cy=50)  # bus left of line
+    c.observe(track_id=1, class_id=5, cx=220, cy=55)  # now right -> crossed "right"
+    assert c.total() == 1
+    assert c.breakdown()["bus"]["right"] == 1
+    assert c.breakdown()["bus"]["left"] == 0
+
+
+def test_line_x_counts_right_to_left_crossing():
+    c = LineCrossingCounter(line_x=200)
+    c.observe(track_id=1, class_id=5, cx=220, cy=50)
+    c.observe(track_id=1, class_id=5, cx=180, cy=55)
+    assert c.breakdown()["bus"]["left"] == 1
+
+
+def test_line_counter_ignores_non_vehicle_class():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=0, cx=50, cy=80)   # person
+    c.observe(track_id=1, class_id=0, cx=55, cy=120)
+    assert c.total() == 0
+
+
+def test_line_counter_requires_exactly_one_axis():
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        LineCrossingCounter()
+    with _pt.raises(ValueError):
+        LineCrossingCounter(line_y=100, line_x=200)
+
+
+def test_line_counter_first_observation_does_not_count():
+    # A track that appears already past the line shouldn't be counted retroactively.
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=120)
+    assert c.total() == 0
+
+
+def test_line_counter_summary_shape():
+    c = LineCrossingCounter(line_y=100)
+    c.observe(track_id=1, class_id=2, cx=50, cy=80)
+    c.observe(track_id=1, class_id=2, cx=55, cy=120)
+    summary = c.summary(source="x.mp4", duration_real=2.5, model="yolov8n.pt")
+    assert summary["total"] == 1
+    assert summary["source"] == "x.mp4"
+    assert summary["duration_real"] == 2.5
+    assert summary["model"] == "yolov8n.pt"
+    assert summary["line_y"] == 100
+    assert summary["line_x"] is None
+    assert summary["breakdown"]["car"]["down"] == 1
+    assert summary["breakdown"]["car"]["up"] == 0
+    assert summary["track_ids"]["car"]["down"] == [1]

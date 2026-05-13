@@ -63,6 +63,87 @@ class VehicleCounter:
         }
 
 
+class LineCrossingCounter:
+    """Counts unique vehicles that cross a virtual line, with direction.
+
+    Exactly one of `line_y` or `line_x` must be set.
+    - `line_y=N` → horizontal line at row N. Reports "down" (top→bottom) and "up" (bottom→top).
+    - `line_x=N` → vertical line at column N. Reports "right" (left→right) and "left" (right→left).
+
+    A track is counted on its first crossing only; subsequent crossings by the
+    same track_id are ignored.
+    """
+
+    def __init__(self, line_y: int | None = None, line_x: int | None = None) -> None:
+        if (line_y is None) == (line_x is None):
+            raise ValueError("Pass exactly one of line_y or line_x.")
+        self.line_y = line_y
+        self.line_x = line_x
+        self._last_pos: dict[int, tuple[int, int]] = {}
+        if line_y is not None:
+            dirs = ("down", "up")
+        else:
+            dirs = ("right", "left")
+        self._dirs = dirs
+        self._crossed: dict[str, dict[str, set[int]]] = {
+            name: {d: set() for d in dirs}
+            for name in VEHICLE_CLASSES.values()
+        }
+        self._already_counted: set[int] = set()
+
+    def observe(self, track_id: int, class_id: int, cx: int, cy: int) -> None:
+        name = VEHICLE_CLASSES.get(class_id)
+        if name is None:
+            return
+        prev = self._last_pos.get(track_id)
+        self._last_pos[track_id] = (cx, cy)
+        if prev is None or track_id in self._already_counted:
+            return
+        px, py = prev
+        if self.line_y is not None:
+            if py < self.line_y <= cy:
+                self._crossed[name]["down"].add(track_id)
+                self._already_counted.add(track_id)
+            elif py > self.line_y >= cy:
+                self._crossed[name]["up"].add(track_id)
+                self._already_counted.add(track_id)
+        else:
+            if px < self.line_x <= cx:
+                self._crossed[name]["right"].add(track_id)
+                self._already_counted.add(track_id)
+            elif px > self.line_x >= cx:
+                self._crossed[name]["left"].add(track_id)
+                self._already_counted.add(track_id)
+
+    def total(self) -> int:
+        return sum(
+            len(self._crossed[n][d])
+            for n in self._crossed
+            for d in self._dirs
+        )
+
+    def breakdown(self) -> dict[str, dict[str, int]]:
+        return {
+            n: {d: len(self._crossed[n][d]) for d in self._dirs}
+            for n in self._crossed
+        }
+
+    def summary(self, source: str, duration_real: float, model: str) -> dict:
+        return {
+            "source": source,
+            "duration_real": duration_real,
+            "model": model,
+            "line_y": self.line_y,
+            "line_x": self.line_x,
+            "total": self.total(),
+            "breakdown": self.breakdown(),
+            "track_ids": {
+                n: {d: sorted(self._crossed[n][d]) for d in self._dirs}
+                for n in self._crossed
+            },
+        }
+
+
 import argparse
 from pathlib import Path
 
