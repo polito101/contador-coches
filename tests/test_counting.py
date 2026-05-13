@@ -230,3 +230,25 @@ def test_parse_args_line_x_set():
 def test_parse_args_preview_frame():
     args = parse_args(["--source", "foo.mp4", "--preview-frame"])
     assert args.preview_frame is True
+
+
+def test_parse_args_pick_line():
+    args = parse_args(["--source", "foo.mp4"])
+    assert args.pick_line is False
+    args = parse_args(["--source", "foo.mp4", "--pick-line"])
+    assert args.pick_line is True
+
+
+from contar import _snap_line
+
+
+def test_snap_line_horizontal_dominant():
+    assert _snap_line((10, 100), (200, 110)) == ("y", 105)
+
+
+def test_snap_line_vertical_dominant():
+    assert _snap_line((100, 10), (110, 200)) == ("x", 105)
+
+
+def test_snap_line_equal_axes_prefers_horizontal():
+    assert _snap_line((0, 0), (100, 100)) == ("y", 50)

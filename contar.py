@@ -178,6 +178,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Save the first frame of the source as PNG to "
                         "<output-dir>/preview_<timestamp>.png and exit. Use to "
                         "pick pixel coordinates for --line-y/--line-x.")
+    p.add_argument("--pick-line", action="store_true",
+                   help="Open the first frame in a window and let you click "
+                        "two points to define the counting line interactively. "
+                        "Snaps to horizontal/vertical based on dominant axis.")
     return p.parse_args(argv)
 
 
@@ -270,6 +274,79 @@ def _preview_frame(args: argparse.Namespace) -> int:
     return 0
 
 
+def _snap_line(p1: tuple[int, int], p2: tuple[int, int]) -> tuple[str, int]:
+    """Snap a two-point line to the dominant axis.
+
+    Returns ("y", y) for a horizontal line at row y, or ("x", x) for a vertical
+    line at column x.
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+    if abs(x2 - x1) >= abs(y2 - y1):
+        return "y", (y1 + y2) // 2
+    return "x", (x1 + x2) // 2
+
+
+def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
+    """Open a window, let user click 2 points to define a counting line.
+
+    Returns (line_y, line_x) — exactly one is set, or both None if cancelled.
+    """
+    state = {"p1": None, "p2": None, "hover": None}
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if state["p1"] is None:
+                state["p1"] = (x, y)
+            elif state["p2"] is None:
+                state["p2"] = (x, y)
+        elif event == cv2.EVENT_MOUSEMOVE:
+            state["hover"] = (x, y)
+
+    win = "Pick line  (click 2 points,  Enter=ok, R=redo, Esc=cancel)"
+    cv2.namedWindow(win)
+    cv2.setMouseCallback(win, on_mouse)
+    h, w = frame.shape[:2]
+
+    while True:
+        display = frame.copy()
+        if state["p1"] is None:
+            msg = "Click first point"
+        elif state["p2"] is None:
+            cv2.circle(display, state["p1"], 5, (0, 0, 255), -1)
+            if state["hover"] is not None:
+                kind, val = _snap_line(state["p1"], state["hover"])
+                if kind == "y":
+                    cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
+                else:
+                    cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
+            msg = "Click second point"
+        else:
+            kind, val = _snap_line(state["p1"], state["p2"])
+            if kind == "y":
+                cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
+            else:
+                cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
+            msg = f"line_{kind}={val}  Enter=ok  R=redo  Esc=cancel"
+
+        cv2.rectangle(display, (0, 0), (w, 30), (0, 0, 0), -1)
+        cv2.putText(display, msg, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.imshow(win, display)
+
+        k = cv2.waitKey(20) & 0xFF
+        if k == 27:  # Esc
+            cv2.destroyWindow(win)
+            return None, None
+        if k in (13, 10) and state["p1"] is not None and state["p2"] is not None:
+            kind, val = _snap_line(state["p1"], state["p2"])
+            cv2.destroyWindow(win)
+            return (val, None) if kind == "y" else (None, val)
+        if k in (ord("r"), ord("R")):
+            state["p1"] = None
+            state["p2"] = None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -288,6 +365,21 @@ def main(argv: list[str] | None = None) -> int:
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
     fps_stream = cap.get(cv2.CAP_PROP_FPS)
     fps = fps_stream if 1.0 < fps_stream < 120.0 else 25.0
+
+    if args.pick_line:
+        ok, first = cap.read()
+        if not ok or first is None:
+            print("ERROR: could not read first frame for line picker.", file=sys.stderr)
+            cap.release()
+            return 1
+        line_y, line_x = _pick_line_interactive(first)
+        if line_y is None and line_x is None:
+            print("Line picker cancelled.", file=sys.stderr)
+            cap.release()
+            return 2
+        args.line_y = line_y
+        args.line_x = line_x
+        print(f"Line picked: line_y={line_y}, line_x={line_x}")
 
     output_dir = Path(args.output_dir)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

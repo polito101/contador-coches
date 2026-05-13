@@ -65,6 +65,7 @@ Pulsa `q` mientras corre para terminar antes.
 | `--line-y`        | `None`         | Píxel Y de la línea horizontal de conteo. Activa modo línea + dirección. |
 | `--line-x`        | `None`         | Píxel X de la línea vertical. Mutuamente excluyente con `--line-y`.      |
 | `--preview-frame` | off            | Guarda el primer frame como PNG y sale. Usar para elegir `--line-y/x`.   |
+| `--pick-line`     | off            | Abre el primer frame y eliges la línea con 2 clicks (Enter/R/Esc).       |
 | `--model`         | `yolov8n.pt`   | Pesos del modelo (`yolov8s.pt` más preciso, más lento)                   |
 | `--output-dir`    | `output`       | Carpeta de salida                                                        |
 | `--no-save`       | off            | No guardar vídeo ni JSON                                                 |
@@ -76,7 +77,15 @@ Pulsa `q` mientras corre para terminar antes.
 
 **Con línea (`--line-y` o `--line-x`):** solo cuenta vehículos que cruzan una línea virtual. Mucho más preciso y reporta dirección.
 
-Para elegir el píxel de la línea:
+**Opción rápida — picker interactivo:**
+
+```powershell
+.\.venv\Scripts\python.exe contar.py --source "URL" --pick-line --duration 30
+```
+
+Se abre el primer frame en una ventana. Haz **2 clicks** para marcar dos puntos de la línea; la app la "snap-ea" a horizontal o vertical según qué eje sea más largo. **Enter** confirma, **R** rehace, **Esc** cancela. Después continúa procesando el vídeo con esa línea.
+
+**Opción manual — flags con píxeles:**
 
 ```powershell
 # 1. Guarda el primer frame
