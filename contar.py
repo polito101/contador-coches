@@ -300,7 +300,12 @@ def main(argv: list[str] | None = None) -> int:
         json_path = output_dir / f"{timestamp}.json"
         writer = make_writer(video_path, width, height, fps)
 
-    counter = VehicleCounter(min_frames=args.min_frames)
+    use_line = args.line_y is not None or args.line_x is not None
+    counter: VehicleCounter | LineCrossingCounter
+    if use_line:
+        counter = LineCrossingCounter(line_y=args.line_y, line_x=args.line_x)
+    else:
+        counter = VehicleCounter(min_frames=args.min_frames)
     vehicle_class_ids = list(VEHICLE_CLASSES.keys())
 
     print(f"Processing {args.duration}s from {args.source} ...")
@@ -327,10 +332,24 @@ def main(argv: list[str] | None = None) -> int:
             if r.boxes is not None and r.boxes.id is not None:
                 ids = r.boxes.id.int().cpu().tolist()
                 clss = r.boxes.cls.int().cpu().tolist()
-                for tid, cid in zip(ids, clss):
-                    counter.add(track_id=tid, class_id=cid)
+                if use_line:
+                    # xywh: [cx, cy, w, h] (centroid format)
+                    xywh = r.boxes.xywh.cpu().numpy()
+                    for tid, cid, (cx, cy, _, _) in zip(ids, clss, xywh):
+                        counter.observe(track_id=tid, class_id=cid,
+                                        cx=int(cx), cy=int(cy))
+                else:
+                    for tid, cid in zip(ids, clss):
+                        counter.add(track_id=tid, class_id=cid)
 
             annotated = r.plot()
+            if use_line:
+                if args.line_y is not None:
+                    cv2.line(annotated, (0, args.line_y),
+                             (annotated.shape[1], args.line_y), (0, 255, 255), 2)
+                else:
+                    cv2.line(annotated, (args.line_x, 0),
+                             (args.line_x, annotated.shape[0]), (0, 255, 255), 2)
 
             if writer is not None:
                 writer.write(annotated)
@@ -356,10 +375,20 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(f"Han pasado {counter.total()} vehículos en {duration_real:.1f} s "
           f"({frame_count} frames procesados)")
-    print(f"  coches:    {breakdown['car']:>4}")
-    print(f"  motos:     {breakdown['motorcycle']:>4}")
-    print(f"  camiones:  {breakdown['truck']:>4}")
-    print(f"  autobuses: {breakdown['bus']:>4}")
+    if use_line:
+        # breakdown is dict[class, dict[direction, count]]
+        dir_names = ("down", "up") if args.line_y is not None else ("right", "left")
+        header = f"  {'clase':<10} {dir_names[0]:>6} {dir_names[1]:>6}"
+        print(header)
+        for label, key in [("coches", "car"), ("motos", "motorcycle"),
+                            ("camiones", "truck"), ("autobuses", "bus")]:
+            d = breakdown[key]
+            print(f"  {label:<10} {d[dir_names[0]]:>6} {d[dir_names[1]]:>6}")
+    else:
+        print(f"  coches:    {breakdown['car']:>4}")
+        print(f"  motos:     {breakdown['motorcycle']:>4}")
+        print(f"  camiones:  {breakdown['truck']:>4}")
+        print(f"  autobuses: {breakdown['bus']:>4}")
 
     if json_path is not None:
         summary = counter.summary(
