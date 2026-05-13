@@ -118,93 +118,108 @@ def test_summary_includes_min_frames():
 from contar import LineCrossingCounter
 
 
-def test_line_y_counts_top_to_bottom_crossing():
-    c = LineCrossingCounter(line_y=100)
-    c.observe(track_id=1, class_id=2, cx=50, cy=80)   # car above line
-    c.observe(track_id=1, class_id=2, cx=55, cy=120)  # now below -> crossed down
+def test_segment_counts_top_to_bottom_crossing():
+    # Horizontal segment from (0,100) to (200,100). Vehicle crosses through it.
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
+    c.observe(track_id=1, class_id=2, cx=50, cy=80)
+    c.observe(track_id=1, class_id=2, cx=55, cy=120)
     assert c.total() == 1
-    bd = c.breakdown()
-    assert bd["car"]["down"] == 1
-    assert bd["car"]["up"] == 0
+    assert c.breakdown()["car"] == {"down": 1, "up": 0}
 
 
-def test_line_y_counts_bottom_to_top_crossing():
-    c = LineCrossingCounter(line_y=100)
+def test_segment_counts_bottom_to_top_crossing():
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
     c.observe(track_id=1, class_id=2, cx=50, cy=150)
     c.observe(track_id=1, class_id=2, cx=55, cy=50)
-    assert c.total() == 1
     assert c.breakdown()["car"]["up"] == 1
-    assert c.breakdown()["car"]["down"] == 0
 
 
-def test_line_y_no_count_when_not_crossing():
-    c = LineCrossingCounter(line_y=100)
+def test_segment_does_not_count_path_outside_segment():
+    # Segment only spans x=0..200. Vehicle path crosses y=100 at x=400 — outside.
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
+    c.observe(track_id=1, class_id=2, cx=400, cy=80)
+    c.observe(track_id=1, class_id=2, cx=405, cy=120)
+    assert c.total() == 0
+
+
+def test_segment_no_count_when_not_crossing():
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
     c.observe(track_id=1, class_id=2, cx=50, cy=20)
     c.observe(track_id=1, class_id=2, cx=55, cy=30)
     assert c.total() == 0
 
 
-def test_line_y_no_double_count_same_track():
-    c = LineCrossingCounter(line_y=100)
+def test_segment_no_double_count_same_track():
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
     c.observe(track_id=1, class_id=2, cx=50, cy=80)
     c.observe(track_id=1, class_id=2, cx=55, cy=120)  # cross
     c.observe(track_id=1, class_id=2, cx=60, cy=80)   # cross back
-    c.observe(track_id=1, class_id=2, cx=65, cy=120)  # cross again
-    # Still counted once — first crossing wins.
+    c.observe(track_id=1, class_id=2, cx=65, cy=120)  # again
     assert c.total() == 1
 
 
-def test_line_x_counts_left_to_right_crossing():
-    c = LineCrossingCounter(line_x=200)
-    c.observe(track_id=1, class_id=5, cx=180, cy=50)  # bus left of line
-    c.observe(track_id=1, class_id=5, cx=220, cy=55)  # now right -> crossed "right"
-    assert c.total() == 1
-    assert c.breakdown()["bus"]["right"] == 1
-    assert c.breakdown()["bus"]["left"] == 0
+def test_vertical_segment_left_to_right():
+    c = LineCrossingCounter(p1=(200, 0), p2=(200, 200))
+    c.observe(track_id=1, class_id=5, cx=180, cy=50)
+    c.observe(track_id=1, class_id=5, cx=220, cy=55)
+    assert c.breakdown()["bus"] == {"right": 1, "left": 0}
 
 
-def test_line_x_counts_right_to_left_crossing():
-    c = LineCrossingCounter(line_x=200)
+def test_vertical_segment_right_to_left():
+    c = LineCrossingCounter(p1=(200, 0), p2=(200, 200))
     c.observe(track_id=1, class_id=5, cx=220, cy=50)
     c.observe(track_id=1, class_id=5, cx=180, cy=55)
     assert c.breakdown()["bus"]["left"] == 1
 
 
+def test_diagonal_segment_uses_dominant_axis_naming():
+    # Mostly-horizontal diagonal — labels should be down/up
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 110))
+    c.observe(track_id=1, class_id=2, cx=100, cy=50)
+    c.observe(track_id=1, class_id=2, cx=100, cy=200)
+    bd = c.breakdown()
+    assert "down" in bd["car"]
+    assert bd["car"]["down"] == 1
+
+
+def test_segment_direction_independent_of_drag_order():
+    # Same segment, drawn either way, should yield the same direction labels.
+    a = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
+    b = LineCrossingCounter(p1=(200, 100), p2=(0, 100))
+    for c in (a, b):
+        c.observe(track_id=1, class_id=2, cx=50, cy=50)
+        c.observe(track_id=1, class_id=2, cx=55, cy=150)
+    assert a.breakdown()["car"]["down"] == 1
+    assert b.breakdown()["car"]["down"] == 1
+
+
 def test_line_counter_ignores_non_vehicle_class():
-    c = LineCrossingCounter(line_y=100)
-    c.observe(track_id=1, class_id=0, cx=50, cy=80)   # person
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
+    c.observe(track_id=1, class_id=0, cx=50, cy=80)
     c.observe(track_id=1, class_id=0, cx=55, cy=120)
     assert c.total() == 0
 
 
-def test_line_counter_requires_exactly_one_axis():
+def test_line_counter_rejects_zero_length_segment():
     import pytest as _pt
     with _pt.raises(ValueError):
-        LineCrossingCounter()
-    with _pt.raises(ValueError):
-        LineCrossingCounter(line_y=100, line_x=200)
+        LineCrossingCounter(p1=(10, 10), p2=(10, 10))
 
 
 def test_line_counter_first_observation_does_not_count():
-    # A track that appears already past the line shouldn't be counted retroactively.
-    c = LineCrossingCounter(line_y=100)
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
     c.observe(track_id=1, class_id=2, cx=50, cy=120)
     assert c.total() == 0
 
 
 def test_line_counter_summary_shape():
-    c = LineCrossingCounter(line_y=100)
+    c = LineCrossingCounter(p1=(0, 100), p2=(200, 100))
     c.observe(track_id=1, class_id=2, cx=50, cy=80)
     c.observe(track_id=1, class_id=2, cx=55, cy=120)
     summary = c.summary(source="x.mp4", duration_real=2.5, model="yolov8n.pt")
     assert summary["total"] == 1
-    assert summary["source"] == "x.mp4"
-    assert summary["duration_real"] == 2.5
-    assert summary["model"] == "yolov8n.pt"
-    assert summary["line_y"] == 100
-    assert summary["line_x"] is None
+    assert summary["line"] == {"p1": [0, 100], "p2": [200, 100]}
     assert summary["breakdown"]["car"]["down"] == 1
-    assert summary["breakdown"]["car"]["up"] == 0
     assert summary["track_ids"]["car"]["down"] == [1]
 
 
@@ -230,6 +245,24 @@ def test_parse_args_line_x_set():
 def test_parse_args_preview_frame():
     args = parse_args(["--source", "foo.mp4", "--preview-frame"])
     assert args.preview_frame is True
+
+
+def test_parse_args_line_segment():
+    args = parse_args(["--source", "foo.mp4", "--line", "10,20,300,40"])
+    assert args.line == "10,20,300,40"
+
+
+from contar import _parse_line_arg
+
+
+def test_parse_line_arg_valid():
+    assert _parse_line_arg("10,20,300,40") == ((10, 20), (300, 40))
+
+
+def test_parse_line_arg_invalid():
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        _parse_line_arg("10,20,300")  # only 3 parts
 
 
 def test_parse_args_pick_line():

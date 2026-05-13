@@ -64,32 +64,57 @@ class VehicleCounter:
 
 
 class LineCrossingCounter:
-    """Counts unique vehicles that cross a virtual line, with direction.
+    """Counts unique vehicles that cross a line SEGMENT (not an infinite line).
 
-    Exactly one of `line_y` or `line_x` must be set.
-    - `line_y=N` → horizontal line at row N. Reports "down" (top→bottom) and "up" (bottom→top).
-    - `line_x=N` → vertical line at column N. Reports "right" (left→right) and "left" (right→left).
-
-    A track is counted on its first crossing only; subsequent crossings by the
-    same track_id are ignored.
+    The segment is defined by two endpoints `p1` and `p2`. A vehicle is
+    counted the first time its centroid path between consecutive frames
+    intersects this segment. Direction is reported as ``down``/``up`` for
+    a mostly-horizontal segment, or ``right``/``left`` for a mostly-vertical
+    one — independent of which way the user drew the segment.
     """
 
-    def __init__(self, line_y: int | None = None, line_x: int | None = None) -> None:
-        if (line_y is None) == (line_x is None):
-            raise ValueError("Pass exactly one of line_y or line_x.")
-        self.line_y = line_y
-        self.line_x = line_x
-        self._last_pos: dict[int, tuple[int, int]] = {}
-        if line_y is not None:
-            dirs = ("down", "up")
+    def __init__(self, p1: tuple[int, int], p2: tuple[int, int]) -> None:
+        if p1 == p2:
+            raise ValueError("Segment endpoints must differ.")
+        # Normalize so direction labels don't depend on drag order.
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        if abs(dx) >= abs(dy):
+            if dx < 0:
+                p1, p2 = p2, p1
+            self._dirs: tuple[str, str] = ("down", "up")
         else:
-            dirs = ("right", "left")
-        self._dirs = dirs
+            if dy < 0:
+                p1, p2 = p2, p1
+            self._dirs = ("right", "left")
+        self.p1 = p1
+        self.p2 = p2
+        self._last_pos: dict[int, tuple[int, int]] = {}
         self._crossed: dict[str, dict[str, set[int]]] = {
-            name: {d: set() for d in dirs}
+            name: {d: set() for d in self._dirs}
             for name in VEHICLE_CLASSES.values()
         }
         self._already_counted: set[int] = set()
+
+    @staticmethod
+    def _orient(a: tuple[int, int], b: tuple[int, int],
+                c: tuple[int, int]) -> int:
+        v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        if v > 0:
+            return 1
+        if v < 0:
+            return -1
+        return 0
+
+    @classmethod
+    def _segments_intersect(cls, a1, a2, b1, b2) -> bool:
+        # Strict (non-collinear) intersection. Collinear-on-segment cases are
+        # rare for centroid paths and we don't need to count them specially.
+        o1 = cls._orient(a1, a2, b1)
+        o2 = cls._orient(a1, a2, b2)
+        o3 = cls._orient(b1, b2, a1)
+        o4 = cls._orient(b1, b2, a2)
+        return o1 != o2 and o3 != o4
 
     def observe(self, track_id: int, class_id: int, cx: int, cy: int) -> None:
         name = VEHICLE_CLASSES.get(class_id)
@@ -99,21 +124,19 @@ class LineCrossingCounter:
         self._last_pos[track_id] = (cx, cy)
         if prev is None or track_id in self._already_counted:
             return
-        px, py = prev
-        if self.line_y is not None:
-            if py < self.line_y <= cy:
-                self._crossed[name]["down"].add(track_id)
-                self._already_counted.add(track_id)
-            elif py > self.line_y >= cy:
-                self._crossed[name]["up"].add(track_id)
-                self._already_counted.add(track_id)
+        curr = (cx, cy)
+        if not self._segments_intersect(prev, curr, self.p1, self.p2):
+            return
+        # Direction: sign of (p1→p2) × (p1→prev) after normalization.
+        # Horizontal-ish (normalized dx > 0): negative => prev above => "down".
+        # Vertical-ish   (normalized dy > 0): positive => prev left  => "right".
+        side = self._orient(self.p1, self.p2, prev)
+        if self._dirs[0] == "down":
+            direction = "down" if side < 0 else "up"
         else:
-            if px < self.line_x <= cx:
-                self._crossed[name]["right"].add(track_id)
-                self._already_counted.add(track_id)
-            elif px > self.line_x >= cx:
-                self._crossed[name]["left"].add(track_id)
-                self._already_counted.add(track_id)
+            direction = "right" if side > 0 else "left"
+        self._crossed[name][direction].add(track_id)
+        self._already_counted.add(track_id)
 
     def total(self) -> int:
         return sum(
@@ -133,8 +156,7 @@ class LineCrossingCounter:
             "source": source,
             "duration_real": duration_real,
             "model": model,
-            "line_y": self.line_y,
-            "line_x": self.line_x,
+            "line": {"p1": list(self.p1), "p2": list(self.p2)},
             "total": self.total(),
             "breakdown": self.breakdown(),
             "track_ids": {
@@ -168,12 +190,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--min-frames", type=int, default=5,
                    help="Minimum frames a track must appear in to be counted "
                         "(default: 5). Higher = filters out ephemeral re-IDs.")
+    p.add_argument("--line", type=str, default=None,
+                   help="Counting segment as 'x1,y1,x2,y2'. Enables line-crossing "
+                        "mode (overrides --min-frames). Use --pick-line for "
+                        "interactive selection.")
     p.add_argument("--line-y", type=int, default=None,
-                   help="Horizontal counting line at this pixel row. When set, "
-                        "use line-crossing mode (overrides --min-frames).")
+                   help="Shorthand: full-width horizontal line at row Y.")
     p.add_argument("--line-x", type=int, default=None,
-                   help="Vertical counting line at this pixel column. Mutually "
-                        "exclusive with --line-y.")
+                   help="Shorthand: full-height vertical line at column X.")
     p.add_argument("--preview-frame", action="store_true",
                    help="Save the first frame of the source as PNG to "
                         "<output-dir>/preview_<timestamp>.png and exit. Use to "
@@ -290,12 +314,12 @@ def _snap_line(p1: tuple[int, int], p2: tuple[int, int]) -> tuple[str, int]:
 _MIN_DRAG_PX = 10  # ignore accidental clicks shorter than this in both axes
 
 
-def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
-    """Open a window, let user click-and-drag to define a counting line.
+def _pick_line_interactive(frame) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """Open a window, let user click-and-drag to define a counting line segment.
 
-    Returns (line_y, line_x) — exactly one is set, or both None if cancelled.
+    Returns (p1, p2) endpoints, or None if cancelled.
     """
-    state = {"p1": None, "p2": None, "dragging": False, "hover": None}
+    state: dict = {"p1": None, "p2": None, "dragging": False, "hover": None}
 
     def on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -313,9 +337,9 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
                 if dx >= _MIN_DRAG_PX or dy >= _MIN_DRAG_PX:
                     state["p2"] = (x, y)
                 else:
-                    state["p1"] = None  # treat as accidental click
+                    state["p1"] = None  # accidental click
 
-    win = "Pick line  (click-and-drag,  Enter=ok, R=redo, Esc=cancel)"
+    win = "Pick segment  (drag A->B,  Enter=ok, R=redo, Esc=cancel)"
     cv2.namedWindow(win)
     cv2.setMouseCallback(win, on_mouse)
     h, w = frame.shape[:2]
@@ -323,25 +347,20 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
     while True:
         display = frame.copy()
         if state["p1"] is None:
-            msg = "Click-and-drag from A to B to draw the line"
+            msg = "Click and drag from A to B to draw the segment"
         elif state["dragging"]:
             cv2.circle(display, state["p1"], 5, (0, 0, 255), -1)
             if state["hover"] is not None:
-                kind, val = _snap_line(state["p1"], state["hover"])
-                if kind == "y":
-                    cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
-                else:
-                    cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
+                cv2.line(display, state["p1"], state["hover"], (0, 255, 255), 2)
             msg = "Release to confirm"
         elif state["p2"] is not None:
-            kind, val = _snap_line(state["p1"], state["p2"])
-            if kind == "y":
-                cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
-            else:
-                cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
-            msg = f"line_{kind}={val}  Enter=ok  R=redo  Esc=cancel"
+            cv2.line(display, state["p1"], state["p2"], (0, 255, 255), 2)
+            cv2.circle(display, state["p1"], 4, (0, 0, 255), -1)
+            cv2.circle(display, state["p2"], 4, (0, 0, 255), -1)
+            msg = (f"segment {state['p1']}->{state['p2']}  "
+                   f"Enter=ok  R=redo  Esc=cancel")
         else:
-            msg = "Click-and-drag from A to B to draw the line"
+            msg = "Click and drag from A to B to draw the segment"
 
         cv2.rectangle(display, (0, 0), (w, 30), (0, 0, 0), -1)
         cv2.putText(display, msg, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
@@ -349,24 +368,36 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
         cv2.imshow(win, display)
 
         k = cv2.waitKey(20) & 0xFF
-        if k == 27:  # Esc
+        if k == 27:
             cv2.destroyWindow(win)
-            return None, None
+            return None
         if k in (13, 10) and state["p1"] is not None and state["p2"] is not None:
-            kind, val = _snap_line(state["p1"], state["p2"])
+            p1, p2 = state["p1"], state["p2"]
             cv2.destroyWindow(win)
-            return (val, None) if kind == "y" else (None, val)
+            return p1, p2
         if k in (ord("r"), ord("R")):
             state["p1"] = None
             state["p2"] = None
             state["dragging"] = False
 
 
+def _parse_line_arg(s: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Parse a '--line x1,y1,x2,y2' string into two endpoints."""
+    parts = [p.strip() for p in s.split(",")]
+    if len(parts) != 4:
+        raise ValueError("--line must be 'x1,y1,x2,y2'")
+    x1, y1, x2, y2 = (int(p) for p in parts)
+    return (x1, y1), (x2, y2)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    if args.line_y is not None and args.line_x is not None:
-        print("ERROR: pass either --line-y or --line-x, not both.", file=sys.stderr)
+    explicit_line_modes = sum(
+        v is not None for v in (args.line, args.line_y, args.line_x)
+    )
+    if explicit_line_modes > 1:
+        print("ERROR: pass only one of --line, --line-y, --line-x.", file=sys.stderr)
         return 2
 
     if args.preview_frame:
@@ -381,20 +412,31 @@ def main(argv: list[str] | None = None) -> int:
     fps_stream = cap.get(cv2.CAP_PROP_FPS)
     fps = fps_stream if 1.0 < fps_stream < 120.0 else 25.0
 
-    if args.pick_line:
+    # Resolve the counting segment (if any) from CLI flags or interactive picker.
+    segment: tuple[tuple[int, int], tuple[int, int]] | None = None
+    if args.line is not None:
+        try:
+            segment = _parse_line_arg(args.line)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            cap.release()
+            return 2
+    elif args.line_y is not None:
+        segment = ((0, args.line_y), (width, args.line_y))
+    elif args.line_x is not None:
+        segment = ((args.line_x, 0), (args.line_x, height))
+    elif args.pick_line:
         ok, first = cap.read()
         if not ok or first is None:
             print("ERROR: could not read first frame for line picker.", file=sys.stderr)
             cap.release()
             return 1
-        line_y, line_x = _pick_line_interactive(first)
-        if line_y is None and line_x is None:
+        segment = _pick_line_interactive(first)
+        if segment is None:
             print("Line picker cancelled.", file=sys.stderr)
             cap.release()
             return 2
-        args.line_y = line_y
-        args.line_x = line_x
-        print(f"Line picked: line_y={line_y}, line_x={line_x}")
+        print(f"Segment picked: {segment[0]} -> {segment[1]}")
 
     output_dir = Path(args.output_dir)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -407,10 +449,10 @@ def main(argv: list[str] | None = None) -> int:
         json_path = output_dir / f"{timestamp}.json"
         writer = make_writer(video_path, width, height, fps)
 
-    use_line = args.line_y is not None or args.line_x is not None
+    use_line = segment is not None
     counter: VehicleCounter | LineCrossingCounter
     if use_line:
-        counter = LineCrossingCounter(line_y=args.line_y, line_x=args.line_x)
+        counter = LineCrossingCounter(p1=segment[0], p2=segment[1])
     else:
         counter = VehicleCounter(min_frames=args.min_frames)
     vehicle_class_ids = list(VEHICLE_CLASSES.keys())
@@ -450,13 +492,8 @@ def main(argv: list[str] | None = None) -> int:
                         counter.add(track_id=tid, class_id=cid)
 
             annotated = r.plot()
-            if use_line:
-                if args.line_y is not None:
-                    cv2.line(annotated, (0, args.line_y),
-                             (annotated.shape[1], args.line_y), (0, 255, 255), 2)
-                else:
-                    cv2.line(annotated, (args.line_x, 0),
-                             (args.line_x, annotated.shape[0]), (0, 255, 255), 2)
+            if use_line and segment is not None:
+                cv2.line(annotated, segment[0], segment[1], (0, 255, 255), 2)
 
             if writer is not None:
                 writer.write(annotated)
@@ -484,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
           f"({frame_count} frames procesados)")
     if use_line:
         # breakdown is dict[class, dict[direction, count]]
-        dir_names = ("down", "up") if args.line_y is not None else ("right", "left")
+        dir_names = counter._dirs  # ("down","up") or ("right","left")
         header = f"  {'clase':<10} {dir_names[0]:>6} {dir_names[1]:>6}"
         print(header)
         for label, key in [("coches", "car"), ("motos", "motorcycle"),

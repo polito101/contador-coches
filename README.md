@@ -62,10 +62,11 @@ Pulsa `q` mientras corre para terminar antes.
 | `--duration`      | `30`           | Segundos a procesar                                                      |
 | `--conf`          | `0.5`          | Confianza mínima de detección (0..1)                                     |
 | `--min-frames`    | `5`            | Frames mínimos para contar un track (modo sin línea)                     |
-| `--line-y`        | `None`         | Píxel Y de la línea horizontal de conteo. Activa modo línea + dirección. |
-| `--line-x`        | `None`         | Píxel X de la línea vertical. Mutuamente excluyente con `--line-y`.      |
-| `--preview-frame` | off            | Guarda el primer frame como PNG y sale. Usar para elegir `--line-y/x`.   |
-| `--pick-line`     | off            | Abre el primer frame y dibujas la línea con click-and-drag (Enter/R/Esc).|
+| `--line`          | `None`         | Segmento de conteo `'x1,y1,x2,y2'`. Activa modo línea + dirección.       |
+| `--line-y`        | `None`         | Atajo: segmento horizontal a lo ancho de toda la imagen en la fila Y.    |
+| `--line-x`        | `None`         | Atajo: segmento vertical a lo alto de toda la imagen en la columna X.    |
+| `--preview-frame` | off            | Guarda el primer frame como PNG y sale (para elegir coordenadas a ojo).  |
+| `--pick-line`     | off            | Abre el primer frame, dibujas el segmento con click-and-drag.            |
 | `--model`         | `yolov8n.pt`   | Pesos del modelo (`yolov8s.pt` más preciso, más lento)                   |
 | `--output-dir`    | `output`       | Carpeta de salida                                                        |
 | `--no-save`       | off            | No guardar vídeo ni JSON                                                 |
@@ -75,7 +76,7 @@ Pulsa `q` mientras corre para terminar antes.
 
 **Sin línea (default):** cuenta IDs únicos del tracker. Usa `--conf` y `--min-frames` para filtrar falsos positivos.
 
-**Con línea (`--line-y` o `--line-x`):** solo cuenta vehículos que cruzan una línea virtual. Mucho más preciso y reporta dirección.
+**Con línea (`--line`, `--line-y`, `--line-x` o `--pick-line`):** solo cuenta vehículos cuyo movimiento cruza el **segmento** entre A y B. Mucho más preciso y reporta dirección.
 
 **Opción rápida — picker interactivo:**
 
@@ -83,22 +84,24 @@ Pulsa `q` mientras corre para terminar antes.
 .\.venv\Scripts\python.exe contar.py --source "URL" --pick-line --duration 30
 ```
 
-Se abre el primer frame en una ventana. **Mantén pulsado** el botón del ratón en el punto A y **arrastra** hasta el punto B; mientras arrastras ves un preview amarillo snapeado a horizontal o vertical. **Suelta** para fijar. **Enter** confirma, **R** rehace, **Esc** cancela. Después continúa procesando el vídeo con esa línea.
+Se abre el primer frame en una ventana. **Mantén pulsado** el botón del ratón en A y **arrastra** hasta B; ves un preview amarillo del segmento real (no se extiende a toda la pantalla). **Suelta** para fijar. **Enter** confirma, **R** rehace, **Esc** cancela.
 
-**Opción manual — flags con píxeles:**
+**Opción manual — segmento explícito:**
 
 ```powershell
 # 1. Guarda el primer frame
 .\.venv\Scripts\python.exe contar.py --source "URL" --preview-frame
 
-# 2. Abre output/preview_*.png, mira el píxel Y o X donde quieres la línea
-# 3. Vuelve a lanzar con esa coordenada
-.\.venv\Scripts\python.exe contar.py --source "URL" --line-y 400 --duration 30
+# 2. Abre output/preview_*.png, anota los píxeles de A y B
+# 3. Lanza con esas coordenadas
+.\.venv\Scripts\python.exe contar.py --source "URL" --line "120,300,520,310" --duration 30
 ```
 
-La salida en modo línea desglosa por dirección:
-- `--line-y`: `down` (de arriba a abajo) y `up` (al revés)
-- `--line-x`: `right` (de izquierda a derecha) y `left` (al revés)
+Los atajos `--line-y N` y `--line-x N` dibujan segmentos que ocupan todo el ancho/alto.
+
+La dirección reportada depende de la orientación dominante del segmento:
+- segmento mayoritariamente horizontal → `down`/`up`
+- segmento mayoritariamente vertical → `right`/`left`
 
 ### Ajustando precisión (modo sin línea)
 
