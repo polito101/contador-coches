@@ -168,6 +168,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--min-frames", type=int, default=5,
                    help="Minimum frames a track must appear in to be counted "
                         "(default: 5). Higher = filters out ephemeral re-IDs.")
+    p.add_argument("--line-y", type=int, default=None,
+                   help="Horizontal counting line at this pixel row. When set, "
+                        "use line-crossing mode (overrides --min-frames).")
+    p.add_argument("--line-x", type=int, default=None,
+                   help="Vertical counting line at this pixel column. Mutually "
+                        "exclusive with --line-y.")
+    p.add_argument("--preview-frame", action="store_true",
+                   help="Save the first frame of the source as PNG to "
+                        "<output-dir>/preview_<timestamp>.png and exit. Use to "
+                        "pick pixel coordinates for --line-y/--line-x.")
     return p.parse_args(argv)
 
 

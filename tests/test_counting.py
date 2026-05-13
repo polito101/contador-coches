@@ -206,3 +206,27 @@ def test_line_counter_summary_shape():
     assert summary["breakdown"]["car"]["down"] == 1
     assert summary["breakdown"]["car"]["up"] == 0
     assert summary["track_ids"]["car"]["down"] == [1]
+
+
+def test_parse_args_line_y_default_none():
+    args = parse_args(["--source", "foo.mp4"])
+    assert args.line_y is None
+    assert args.line_x is None
+    assert args.preview_frame is False
+
+
+def test_parse_args_line_y_set():
+    args = parse_args(["--source", "foo.mp4", "--line-y", "400"])
+    assert args.line_y == 400
+    assert args.line_x is None
+
+
+def test_parse_args_line_x_set():
+    args = parse_args(["--source", "foo.mp4", "--line-x", "600"])
+    assert args.line_y is None
+    assert args.line_x == 600
+
+
+def test_parse_args_preview_frame():
+    args = parse_args(["--source", "foo.mp4", "--preview-frame"])
+    assert args.preview_frame is True
