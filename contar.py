@@ -246,8 +246,39 @@ def make_writer(path: Path, width: int, height: int, fps: float) -> cv2.VideoWri
     return cv2.VideoWriter(str(path), fourcc, fps, (width, height))
 
 
+def _preview_frame(args: argparse.Namespace) -> int:
+    """Save the first frame of the source as PNG, then exit.
+
+    Skips model loading and tracking — useful for picking line-y/line-x pixel
+    coordinates visually.
+    """
+    cap = open_capture(args.source, args.duration, args.output_dir)
+    ok, frame = cap.read()
+    cap.release()
+    if not ok or frame is None:
+        print("ERROR: could not read a frame from the source.", file=sys.stderr)
+        return 1
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out_path = output_dir / f"preview_{timestamp}.png"
+    cv2.imwrite(str(out_path), frame)
+    print(f"First frame saved to: {out_path}")
+    print(f"Frame size: {frame.shape[1]}x{frame.shape[0]} (width x height)")
+    print("Open the file, pick a Y or X pixel for your counting line, then run:")
+    print(f"  python contar.py --source <same> --line-y <row>")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.line_y is not None and args.line_x is not None:
+        print("ERROR: pass either --line-y or --line-x, not both.", file=sys.stderr)
+        return 2
+
+    if args.preview_frame:
+        return _preview_frame(args)
 
     print(f"Loading model {args.model}...")
     model = YOLO(args.model)
