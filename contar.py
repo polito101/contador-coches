@@ -412,6 +412,34 @@ def _segment_from_cache_entry(entry) -> tuple[tuple[int, int], tuple[int, int]] 
         return None
 
 
+def _draw_counter_overlay(frame, counter) -> None:
+    """Draw a top-left HUD showing the live total (and per-direction split
+    when using a LineCrossingCounter). Mutates `frame` in place.
+    """
+    lines = [f"Total: {counter.total()}"]
+    if isinstance(counter, LineCrossingCounter):
+        bd = counter.breakdown()
+        d1, d2 = counter._dirs
+        s1 = sum(bd[k][d1] for k in bd)
+        s2 = sum(bd[k][d2] for k in bd)
+        lines.append(f"{d1}: {s1}   {d2}: {s2}")
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.7
+    thickness = 2
+    pad = 8
+    line_h = cv2.getTextSize("Hg", font, scale, thickness)[0][1] + pad
+    box_w = max(cv2.getTextSize(t, font, scale, thickness)[0][0]
+                for t in lines) + 2 * pad
+    box_h = line_h * len(lines) + pad
+    cv2.rectangle(frame, (10, 10), (10 + box_w, 10 + box_h), (0, 0, 0), -1)
+    y = 10 + line_h
+    for t in lines:
+        cv2.putText(frame, t, (10 + pad, y), font, scale,
+                    (0, 255, 255), thickness, cv2.LINE_AA)
+        y += line_h
+
+
 def _parse_line_arg(s: str) -> tuple[tuple[int, int], tuple[int, int]]:
     """Parse a '--line x1,y1,x2,y2' string into two endpoints."""
     parts = [p.strip() for p in s.split(",")]
@@ -536,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
             annotated = r.plot()
             if use_line and segment is not None:
                 cv2.line(annotated, segment[0], segment[1], (0, 255, 255), 2)
+            _draw_counter_overlay(annotated, counter)
 
             if writer is not None:
                 writer.write(annotated)
