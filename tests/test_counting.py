@@ -265,6 +265,47 @@ def test_parse_line_arg_invalid():
         _parse_line_arg("10,20,300")  # only 3 parts
 
 
+from contar import _load_lines_cache, _save_line_to_cache, _segment_from_cache_entry
+
+
+def test_lines_cache_roundtrip(tmp_path):
+    p = tmp_path / "lines.json"
+    assert _load_lines_cache(p) == {}
+    _save_line_to_cache(p, "src.mp4", ((10, 20), (300, 40)))
+    cache = _load_lines_cache(p)
+    assert cache == {"src.mp4": [[10, 20], [300, 40]]}
+
+
+def test_lines_cache_overwrites_same_source(tmp_path):
+    p = tmp_path / "lines.json"
+    _save_line_to_cache(p, "src.mp4", ((10, 20), (300, 40)))
+    _save_line_to_cache(p, "src.mp4", ((1, 2), (3, 4)))
+    assert _load_lines_cache(p) == {"src.mp4": [[1, 2], [3, 4]]}
+
+
+def test_lines_cache_keeps_other_sources(tmp_path):
+    p = tmp_path / "lines.json"
+    _save_line_to_cache(p, "a", ((0, 0), (1, 1)))
+    _save_line_to_cache(p, "b", ((2, 2), (3, 3)))
+    cache = _load_lines_cache(p)
+    assert set(cache.keys()) == {"a", "b"}
+
+
+def test_lines_cache_corrupt_file_returns_empty(tmp_path):
+    p = tmp_path / "lines.json"
+    p.write_text("not json", encoding="utf-8")
+    assert _load_lines_cache(p) == {}
+
+
+def test_segment_from_cache_entry_valid():
+    assert _segment_from_cache_entry([[1, 2], [3, 4]]) == ((1, 2), (3, 4))
+
+
+def test_segment_from_cache_entry_invalid():
+    assert _segment_from_cache_entry("nope") is None
+    assert _segment_from_cache_entry([[1, 2]]) is None
+
+
 def test_parse_args_pick_line():
     args = parse_args(["--source", "foo.mp4"])
     assert args.pick_line is False

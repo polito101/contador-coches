@@ -67,6 +67,8 @@ Pulsa `q` mientras corre para terminar antes.
 | `--line-x`        | `None`         | Atajo: segmento vertical a lo alto de toda la imagen en la columna X.    |
 | `--preview-frame` | off            | Guarda el primer frame como PNG y sale (para elegir coordenadas a ojo).  |
 | `--pick-line`     | off            | Abre el primer frame, dibujas el segmento con click-and-drag.            |
+| `--lines-file`    | `lines.json`   | Archivo donde se cachean los segmentos por fuente.                       |
+| `--no-cached-line`| off            | Ignora cualquier segmento cacheado para esta fuente.                     |
 | `--model`         | `yolov8n.pt`   | Pesos del modelo (`yolov8s.pt` más preciso, más lento)                   |
 | `--output-dir`    | `output`       | Carpeta de salida                                                        |
 | `--no-save`       | off            | No guardar vídeo ni JSON                                                 |
@@ -85,6 +87,19 @@ Pulsa `q` mientras corre para terminar antes.
 ```
 
 Se abre el primer frame en una ventana. **Mantén pulsado** el botón del ratón en A y **arrastra** hasta B; ves un preview amarillo del segmento real (no se extiende a toda la pantalla). **Suelta** para fijar. **Enter** confirma, **R** rehace, **Esc** cancela.
+
+El segmento se **guarda automáticamente** en `lines.json` asociado a la URL/path de `--source`. Próximas ejecuciones con esa misma fuente reutilizan el segmento sin abrir el picker:
+
+```powershell
+# 1ª vez: dibujas
+.\.venv\Scripts\python.exe contar.py --source "URL" --pick-line --duration 30
+
+# Siguientes: no flags de línea, se carga sola
+.\.venv\Scripts\python.exe contar.py --source "URL" --duration 30
+# → "Using cached segment from lines.json: (120, 300) -> (520, 310)"
+```
+
+Para rehacerla, lanza `--pick-line` otra vez (se sobrescribe). Para ignorar la caché, `--no-cached-line`.
 
 **Opción manual — segmento explícito:**
 

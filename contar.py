@@ -203,9 +203,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "<output-dir>/preview_<timestamp>.png and exit. Use to "
                         "pick pixel coordinates for --line-y/--line-x.")
     p.add_argument("--pick-line", action="store_true",
-                   help="Open the first frame in a window and let you click "
-                        "two points to define the counting line interactively. "
-                        "Snaps to horizontal/vertical based on dominant axis.")
+                   help="Open the first frame in a window and click-and-drag "
+                        "to define the counting segment. The segment is saved "
+                        "to lines.json (keyed by --source) for reuse.")
+    p.add_argument("--lines-file", default="lines.json",
+                   help="Path to the per-source segment cache (default: lines.json).")
+    p.add_argument("--no-cached-line", action="store_true",
+                   help="Ignore any segment cached in --lines-file for this source.")
     return p.parse_args(argv)
 
 
@@ -381,6 +385,33 @@ def _pick_line_interactive(frame) -> tuple[tuple[int, int], tuple[int, int]] | N
             state["dragging"] = False
 
 
+def _load_lines_cache(path: Path) -> dict:
+    """Load the per-source segment cache. Empty dict if file missing/corrupt."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_line_to_cache(path: Path, source: str,
+                       segment: tuple[tuple[int, int], tuple[int, int]]) -> None:
+    """Write/overwrite the segment for `source` in the cache file."""
+    cache = _load_lines_cache(path)
+    cache[source] = [list(segment[0]), list(segment[1])]
+    path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+
+
+def _segment_from_cache_entry(entry) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """Convert a cache entry (list[list]) back to a segment tuple, or None if malformed."""
+    try:
+        (x1, y1), (x2, y2) = entry
+        return (int(x1), int(y1)), (int(x2), int(y2))
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_line_arg(s: str) -> tuple[tuple[int, int], tuple[int, int]]:
     """Parse a '--line x1,y1,x2,y2' string into two endpoints."""
     parts = [p.strip() for p in s.split(",")]
@@ -412,8 +443,9 @@ def main(argv: list[str] | None = None) -> int:
     fps_stream = cap.get(cv2.CAP_PROP_FPS)
     fps = fps_stream if 1.0 < fps_stream < 120.0 else 25.0
 
-    # Resolve the counting segment (if any) from CLI flags or interactive picker.
+    # Resolve the counting segment (if any) from CLI flags, picker, or cache.
     segment: tuple[tuple[int, int], tuple[int, int]] | None = None
+    lines_path = Path(args.lines_file)
     if args.line is not None:
         try:
             segment = _parse_line_arg(args.line)
@@ -437,6 +469,16 @@ def main(argv: list[str] | None = None) -> int:
             cap.release()
             return 2
         print(f"Segment picked: {segment[0]} -> {segment[1]}")
+        _save_line_to_cache(lines_path, args.source, segment)
+        print(f"Saved to {lines_path}")
+    elif not args.no_cached_line:
+        cache = _load_lines_cache(lines_path)
+        cached = cache.get(args.source)
+        if cached is not None:
+            segment = _segment_from_cache_entry(cached)
+            if segment is not None:
+                print(f"Using cached segment from {lines_path}: "
+                      f"{segment[0]} -> {segment[1]}")
 
     output_dir = Path(args.output_dir)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
