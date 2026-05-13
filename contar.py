@@ -287,23 +287,35 @@ def _snap_line(p1: tuple[int, int], p2: tuple[int, int]) -> tuple[str, int]:
     return "x", (x1 + x2) // 2
 
 
+_MIN_DRAG_PX = 10  # ignore accidental clicks shorter than this in both axes
+
+
 def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
-    """Open a window, let user click 2 points to define a counting line.
+    """Open a window, let user click-and-drag to define a counting line.
 
     Returns (line_y, line_x) — exactly one is set, or both None if cancelled.
     """
-    state = {"p1": None, "p2": None, "hover": None}
+    state = {"p1": None, "p2": None, "dragging": False, "hover": None}
 
     def on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
-            if state["p1"] is None:
-                state["p1"] = (x, y)
-            elif state["p2"] is None:
-                state["p2"] = (x, y)
-        elif event == cv2.EVENT_MOUSEMOVE:
+            state["p1"] = (x, y)
+            state["p2"] = None
+            state["dragging"] = True
             state["hover"] = (x, y)
+        elif event == cv2.EVENT_MOUSEMOVE and state["dragging"]:
+            state["hover"] = (x, y)
+        elif event == cv2.EVENT_LBUTTONUP and state["dragging"]:
+            state["dragging"] = False
+            if state["p1"] is not None:
+                dx = abs(x - state["p1"][0])
+                dy = abs(y - state["p1"][1])
+                if dx >= _MIN_DRAG_PX or dy >= _MIN_DRAG_PX:
+                    state["p2"] = (x, y)
+                else:
+                    state["p1"] = None  # treat as accidental click
 
-    win = "Pick line  (click 2 points,  Enter=ok, R=redo, Esc=cancel)"
+    win = "Pick line  (click-and-drag,  Enter=ok, R=redo, Esc=cancel)"
     cv2.namedWindow(win)
     cv2.setMouseCallback(win, on_mouse)
     h, w = frame.shape[:2]
@@ -311,8 +323,8 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
     while True:
         display = frame.copy()
         if state["p1"] is None:
-            msg = "Click first point"
-        elif state["p2"] is None:
+            msg = "Click-and-drag from A to B to draw the line"
+        elif state["dragging"]:
             cv2.circle(display, state["p1"], 5, (0, 0, 255), -1)
             if state["hover"] is not None:
                 kind, val = _snap_line(state["p1"], state["hover"])
@@ -320,14 +332,16 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
                     cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
                 else:
                     cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
-            msg = "Click second point"
-        else:
+            msg = "Release to confirm"
+        elif state["p2"] is not None:
             kind, val = _snap_line(state["p1"], state["p2"])
             if kind == "y":
                 cv2.line(display, (0, val), (w, val), (0, 255, 255), 2)
             else:
                 cv2.line(display, (val, 0), (val, h), (0, 255, 255), 2)
             msg = f"line_{kind}={val}  Enter=ok  R=redo  Esc=cancel"
+        else:
+            msg = "Click-and-drag from A to B to draw the line"
 
         cv2.rectangle(display, (0, 0), (w, 30), (0, 0, 0), -1)
         cv2.putText(display, msg, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
@@ -345,6 +359,7 @@ def _pick_line_interactive(frame) -> tuple[int | None, int | None]:
         if k in (ord("r"), ord("R")):
             state["p1"] = None
             state["p2"] = None
+            state["dragging"] = False
 
 
 def main(argv: list[str] | None = None) -> int:
