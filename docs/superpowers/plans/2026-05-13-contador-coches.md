@@ -44,6 +44,7 @@ contador-coches/
 ```
 opencv-python==4.10.0.84
 ultralytics==8.3.40
+yt-dlp==2024.11.18
 ```
 
 - [ ] **Step 2: Create .gitignore**
@@ -403,14 +404,42 @@ import cv2
 from ultralytics import YOLO
 
 
+def resolve_source(source: str) -> str | int:
+    """Translate a user-supplied source into something OpenCV can open.
+
+    - Integer string ("0", "1") -> int (webcam index).
+    - YouTube URL -> direct HLS/MP4 URL via yt-dlp.
+    - Anything else -> returned as-is (file path, RTSP, HTTP .mp4).
+    """
+    # Webcam index
+    try:
+        return int(source)
+    except ValueError:
+        pass
+
+    if "youtube.com" in source or "youtu.be" in source:
+        from yt_dlp import YoutubeDL
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            # Prefer HLS (live) or MP4 (VOD). Cap height for performance.
+            "format": "best[height<=720][protocol^=m3u8]/best[height<=720]",
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(source, download=False)
+            url = info.get("url")
+            if not url:
+                print(f"ERROR: could not extract stream URL from YouTube source.",
+                      file=sys.stderr)
+                sys.exit(1)
+            return url
+
+    return source
+
+
 def open_capture(source: str) -> cv2.VideoCapture:
     """Open a video source. Raises SystemExit with a clear message on failure."""
-    # OpenCV accepts int (webcam index) or string (path/URL). Try int first.
-    src: int | str
-    try:
-        src = int(source)
-    except ValueError:
-        src = source
+    src = resolve_source(source)
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
         print(f"ERROR: could not open source '{source}'. "
@@ -563,7 +592,7 @@ Before testing with the real TfL stream, run for 3 seconds against the same sour
 
 Run:
 ```powershell
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch" --duration 3
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI" --duration 3
 ```
 
 Expected:
@@ -597,7 +626,7 @@ Open the newest `.json` in any editor; confirm it contains `total`, `breakdown`,
 
 Run:
 ```powershell
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch"
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI"
 ```
 
 Expected:
@@ -613,7 +642,7 @@ Compare your manual count to the script's reported total. They should be in the 
 
 Run:
 ```powershell
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch" --no-display --duration 5
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI" --no-display --duration 5
 ```
 
 Expected: no window opens, but final stats still print and files are saved.
@@ -622,7 +651,7 @@ Expected: no window opens, but final stats still print and files are saved.
 
 Run:
 ```powershell
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch" --no-save --duration 5
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI" --no-save --duration 5
 ```
 
 Expected: window shows up, prints stats at end, but `output/` has no new files from this run.
@@ -662,7 +691,7 @@ La primera ejecución descarga automáticamente el modelo YOLO (~6 MB).
 
 ```powershell
 # Vídeo de prueba público de las jamcams de Transport for London
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch"
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI"
 
 # Archivo local
 python contar.py --source ruta\al\video.mp4
@@ -672,6 +701,9 @@ python contar.py --source "rtsp://usuario:password@192.168.1.10:554/stream1"
 
 # Webcam del portátil (índice 0)
 python contar.py --source 0
+
+# Livestream de YouTube (se resuelve automáticamente con yt-dlp)
+python contar.py --source "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
 ### Flags
@@ -725,7 +757,7 @@ Expected: 9 passed.
 
 Run:
 ```powershell
-python contar.py --source "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.08953.mp4?i=jvqch" --duration 10
+python contar.py --source "https://www.youtube.com/watch?v=M3EYAY2MftI" --duration 10
 ```
 
 Expected:
