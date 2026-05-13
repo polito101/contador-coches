@@ -84,7 +84,7 @@ def resolve_source(source: str, duration: float = 30.0, output_dir: str = "outpu
     """Translate a user-supplied source into something OpenCV can open.
 
     - Integer string ("0", "1") -> int (webcam index).
-    - YouTube URL -> downloads `duration + 5` seconds via streamlink to
+    - YouTube URL -> downloads `duration + 5` seconds via yt-dlp to
       `<output_dir>/buffer_<timestamp>.ts` and returns that local path.
     - Anything else -> returned as-is (file path, RTSP, HTTP .mp4/.ts).
     """
@@ -98,22 +98,21 @@ def resolve_source(source: str, duration: float = 30.0, output_dir: str = "outpu
         from datetime import datetime as _dt
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         buffer_path = Path(output_dir) / f"buffer_{_dt.now().strftime('%Y-%m-%d_%H-%M-%S')}.ts"
-        # +5 second cushion so we have enough frames for the full window
         record_seconds = int(duration + 5)
-        print(f"Recording {record_seconds}s of livestream via streamlink to {buffer_path} ...")
-        # streamlink CLI is shipped with the pip package; resolve via the venv's Scripts dir.
-        streamlink_exe = Path(sys.executable).parent / "streamlink.exe"
+        print(f"Recording {record_seconds}s of livestream via yt-dlp to {buffer_path} ...")
+        ytdlp_exe = Path(sys.executable).parent / "yt-dlp.exe"
         cmd = [
-            str(streamlink_exe),
-            "--hls-duration", f"00:00:{record_seconds:02d}",
-            "--output", str(buffer_path),
-            "--force",
+            str(ytdlp_exe),
+            "-f", "best[height<=720]",
+            "--hls-use-mpegts",
+            "--downloader", "ffmpeg",
+            "--downloader-args", f"ffmpeg:-t {record_seconds}",
+            "-o", str(buffer_path),
             source,
-            "720p,best",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0 or not buffer_path.exists():
-            print(f"ERROR: streamlink failed to record stream.\nstdout: {result.stdout}\nstderr: {result.stderr}",
+        if result.returncode != 0 or not buffer_path.exists() or buffer_path.stat().st_size == 0:
+            print(f"ERROR: yt-dlp failed to record stream.\nstdout: {result.stdout}\nstderr: {result.stderr}",
                   file=sys.stderr)
             sys.exit(1)
         print(f"Recorded {buffer_path.stat().st_size // 1024} KiB.")

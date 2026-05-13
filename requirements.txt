@@ -1,6 +1,6 @@
 opencv-python==4.10.0.84
 ultralytics==8.3.40
-yt-dlp==2024.11.18
+yt-dlp>=2026.3.17
 pytest==8.3.3
 streamlink==7.0.0
 lap==0.5.13
