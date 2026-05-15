@@ -63,6 +63,77 @@ class VehicleCounter:
         }
 
 
+def count_vehicles_minframes(
+    source: str | int,
+    duration: float,
+    model_path: str = "yolov8n.pt",
+    min_frames: int = 5,
+    conf: float = 0.5,
+) -> dict:
+    """Process `source` for at most `duration` seconds of wall-clock time and
+    return a counting summary.
+
+    Headless: no display, no file writing. Used by external callers (live-bets
+    DetectionWorker). The CLI in `main()` does additional things (annotated
+    video, JSON output) and remains a separate code path.
+
+    Returns:
+        {
+            "total": int,
+            "breakdown": {"car": int, "truck": int, "motorcycle": int, "bus": int},
+            "frames_processed": int,
+            "duration_real": float,
+        }
+    """
+    # Imports are local because the module-level import of `cv2` and YOLO is
+    # only loaded when this function is actually called (keeps `import contar`
+    # cheap for callers that only want VehicleCounter).
+    import time as _time
+    import cv2 as _cv2
+    from ultralytics import YOLO as _YOLO
+
+    model = _YOLO(model_path)
+    cap = _cv2.VideoCapture(source)
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open source: {source!r}")
+
+    counter = VehicleCounter(min_frames=min_frames)
+    vehicle_class_ids = list(VEHICLE_CLASSES.keys())
+
+    start = _time.monotonic()
+    frame_count = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            results = model.track(
+                frame,
+                persist=True,
+                classes=vehicle_class_ids,
+                conf=conf,
+                verbose=False,
+            )
+            r = results[0]
+            if r.boxes is not None and r.boxes.id is not None:
+                ids = r.boxes.id.int().cpu().tolist()
+                clss = r.boxes.cls.int().cpu().tolist()
+                for tid, cid in zip(ids, clss, strict=False):
+                    counter.add(track_id=tid, class_id=cid)
+            frame_count += 1
+            if _time.monotonic() - start >= duration:
+                break
+    finally:
+        cap.release()
+
+    return {
+        "total": counter.total(),
+        "breakdown": counter.breakdown(),
+        "frames_processed": frame_count,
+        "duration_real": _time.monotonic() - start,
+    }
+
+
 class LineCrossingCounter:
     """Counts unique vehicles that cross a line SEGMENT (not an infinite line).
 

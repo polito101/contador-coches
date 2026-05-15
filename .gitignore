@@ -7,9 +7,6 @@ venv/
 # Project outputs
 output/
 
-# Per-source line picker cache
-lines.json
-
 # Models cached by ultralytics
 *.pt
 
