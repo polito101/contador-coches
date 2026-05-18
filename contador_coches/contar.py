@@ -66,7 +66,7 @@ class VehicleCounter:
 def count_vehicles_minframes(
     source: str | int,
     duration: float,
-    model_path: str = "yolov8n.pt",
+    model_path: str | None = "yolov8n.pt",
     min_frames: int = 5,
     conf: float = 0.5,
 ) -> dict:
@@ -76,6 +76,11 @@ def count_vehicles_minframes(
     Headless: no display, no file writing. Used by external callers (live-bets
     DetectionWorker). The CLI in `main()` does additional things (annotated
     video, JSON output) and remains a separate code path.
+
+    If `model_path` is None or empty, the bundled package weight
+    (``contador_coches/weights/yolov8n.pt``) is resolved via
+    ``importlib.resources``. Callers may still pass an explicit path to
+    override (e.g. for tests or alternate models).
 
     Returns:
         {
@@ -91,6 +96,12 @@ def count_vehicles_minframes(
     import time as _time
     import cv2 as _cv2
     from ultralytics import YOLO as _YOLO
+
+    # Resolve the bundled default model path lazily — keeps importlib.resources
+    # off the import-time path of the package (RESEARCH §3 Landmine).
+    if not model_path:
+        from importlib.resources import files as _files
+        model_path = str(_files("contador_coches.weights") / "yolov8n.pt")
 
     model = _YOLO(model_path)
     cap = _cv2.VideoCapture(source)
@@ -120,6 +131,83 @@ def count_vehicles_minframes(
                 clss = r.boxes.cls.int().cpu().tolist()
                 for tid, cid in zip(ids, clss, strict=False):
                     counter.add(track_id=tid, class_id=cid)
+            frame_count += 1
+            if _time.monotonic() - start >= duration:
+                break
+    finally:
+        cap.release()
+
+    return {
+        "total": counter.total(),
+        "breakdown": counter.breakdown(),
+        "frames_processed": frame_count,
+        "duration_real": _time.monotonic() - start,
+    }
+
+
+def count_vehicles_linecrossing(
+    source: str | int,
+    duration: float,
+    p1: tuple[int, int],
+    p2: tuple[int, int],
+    model_path: str | None = "yolov8n.pt",
+    conf: float = 0.5,
+) -> dict:
+    """Headless line-crossing counter — sibling of `count_vehicles_minframes`.
+
+    Counts vehicles whose centroid path crosses the segment defined by
+    ``(p1, p2)``. Direction is reported per-class via
+    ``LineCrossingCounter.breakdown()``.
+
+    Behaves like the line-crossing branch of the ``main()`` CLI but without
+    rendering, file writing, or window handling — suitable for live-bets
+    DetectionWorker / library-style use.
+
+    If `model_path` is None or empty, the bundled package weight is resolved
+    via ``importlib.resources`` (mirrors ``count_vehicles_minframes``).
+    """
+    # Lazy imports keep `import contador_coches` cheap — same discipline as
+    # count_vehicles_minframes (RESEARCH §2 Landmine).
+    import time as _time
+    import cv2 as _cv2
+    from ultralytics import YOLO as _YOLO
+
+    if not model_path:
+        from importlib.resources import files as _files
+        model_path = str(_files("contador_coches.weights") / "yolov8n.pt")
+
+    model = _YOLO(model_path)
+    cap = _cv2.VideoCapture(source)
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open source: {source!r}")
+
+    counter = LineCrossingCounter(p1=p1, p2=p2)
+    vehicle_class_ids = list(VEHICLE_CLASSES.keys())
+
+    start = _time.monotonic()
+    frame_count = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            results = model.track(
+                frame,
+                persist=True,
+                classes=vehicle_class_ids,
+                conf=conf,
+                verbose=False,
+            )
+            r = results[0]
+            if r.boxes is not None and r.boxes.id is not None:
+                ids = r.boxes.id.int().cpu().tolist()
+                clss = r.boxes.cls.int().cpu().tolist()
+                xywh = r.boxes.xywh.cpu().numpy()
+                for tid, cid, (cx, cy, _, _) in zip(ids, clss, xywh, strict=False):
+                    counter.observe(
+                        track_id=tid, class_id=cid,
+                        cx=int(cx), cy=int(cy),
+                    )
             frame_count += 1
             if _time.monotonic() - start >= duration:
                 break
@@ -289,8 +377,16 @@ import sys
 import time
 from datetime import datetime
 
-import cv2
-from ultralytics import YOLO
+# IMPORTANT — do NOT import cv2 / ultralytics at module top-level.
+# They are only required inside the CLI ``main()`` and inside the
+# headless ``count_vehicles_*`` functions, which lazy-import them.
+# Top-level imports would force every ``import contador_coches`` to
+# load ~200 MB of CV libs even when callers only need ``__version__``
+# or the helper utilities below (RESEARCH §2 Landmine).
+#
+# Functions in this file that need cv2 / YOLO accept them as locals
+# imported inside the function body, OR (for the CLI main() and the
+# interactive picker helpers) defer the import to first use.
 
 
 def resolve_source(source: str, duration: float = 30.0, output_dir: str = "output") -> str | int:
@@ -521,6 +617,17 @@ def _parse_line_arg(s: str) -> tuple[tuple[int, int], tuple[int, int]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Lazy-import cv2 and YOLO here so that ``import contador_coches`` (without
+    # invoking the CLI) does NOT pull in ~200 MB of CV libs. They are bound
+    # as module globals so the CLI helpers (open_capture, _preview_frame,
+    # _pick_line_interactive, _draw_counter_overlay, etc.) can use them
+    # via name lookup just like top-level imports did originally.
+    global cv2, YOLO  # noqa: PLW0603
+    import cv2 as _cv2_mod  # noqa: PLC0415
+    from ultralytics import YOLO as _YOLO_cls  # noqa: PLC0415
+    cv2 = _cv2_mod
+    YOLO = _YOLO_cls
+
     args = parse_args(argv)
 
     explicit_line_modes = sum(

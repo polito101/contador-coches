@@ -1,0 +1,22 @@
+[project]
+name = "contador-coches"
+version = "0.1.0"
+description = "YOLO + ByteTrack vehicle counter for live-bets"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python==4.10.0.84",
+    "ultralytics>=8.4.50",
+    "yt-dlp>=2026.3.17",
+    "lap==0.5.13",
+    "streamlink==7.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["contador_coches*"]
+
+[tool.setuptools.package-data]
+contador_coches = ["weights/*.pt"]

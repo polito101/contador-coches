@@ -134,3 +134,61 @@ La dirección reportada depende de la orientación dominante del segmento:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -v
 ```
+
+## Versioning discipline
+
+`contador-coches` se distribuye como paquete instalable (`pip install
+git+https://.../contador-coches.git@v0.1.0`) y `live-bets` lo pinea por **tag
+inmutable**. La disciplina de versionado es estricta porque downstream
+(live-bets) construye `indexer_version = "<package_semver>+<model_basename>"`
+y ese string entra en el `clip_id` content-addressed (D-06, D-08): un cambio
+silencioso en `min_frames`, `conf` o el modelo YOLO sin bump de semver
+produciría dos clips con `clip_id` idéntico y resultados distintos —
+romperíamos auditoría e idempotencia.
+
+### Reglas
+
+1. **Bump de semver obligatorio** cuando cualquiera de estas cosas cambia:
+   - El valor por defecto de `min_frames` o `conf` en
+     `count_vehicles_minframes` / `count_vehicles_linecrossing`.
+   - El archivo binario de los pesos YOLO bundled
+     (`contador_coches/weights/yolov8n.pt`).
+   - La firma pública de `count_vehicles_minframes`,
+     `count_vehicles_linecrossing`, `resolve_source` o
+     `get_default_model_path`.
+   - El output JSON shape (campos `total`, `breakdown`, `frames_processed`,
+     `duration_real`, etc.).
+2. **Los tags git nunca se mueven.** Bump = nuevo tag (`v0.1.1`, `v0.2.0`).
+   Mover un tag existente rompería la trazabilidad de cualquier clip ya
+   indexado contra esa versión (RESEARCH §1 Pitfall #1, threat T-02-04).
+3. **Bump major (`v1.0.0`)** cuando la firma pública o el output shape
+   rompe compatibilidad. Bump minor (`v0.2.0`) cuando añades funcionalidad
+   manteniendo backwards-compat. Bump patch (`v0.1.1`) para fixes que NO
+   cambien el output para el mismo input — si cambia el output, NO es patch.
+
+### Workflow
+
+```bash
+# 1. Edita el código + actualiza version en pyproject.toml + __init__.py
+# 2. Commit
+git add -A
+git commit -m "feat: bump to 0.2.0 — new min_frames default"
+# 3. Tag (anotado, nunca lightweight)
+git tag -a v0.2.0 -m "v0.2.0 — semver bump per versioning discipline"
+# 4. (Opcional) push si hay remote configurado
+# git push origin master v0.2.0
+```
+
+### Consumo desde live-bets
+
+`live-bets/pyproject.toml` declara la dependencia con el tag pineado:
+
+```toml
+dependencies = [
+    "contador-coches @ git+file:///C/Users/pobom/contador-coches@v0.1.0",
+    # En producción: git+https://github.com/<user>/contador-coches.git@v0.1.0
+]
+```
+
+Cambiar el pin (`@v0.1.0` → `@v0.2.0`) es una decisión deliberada del
+consumer; un `git push` que mueva el tag rompería el contrato.
