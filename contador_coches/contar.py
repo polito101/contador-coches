@@ -70,11 +70,17 @@ def count_vehicles_minframes(
     min_frames: int = 5,
     conf: float = 0.5,
 ) -> dict:
-    """Process `source` for at most `duration` seconds of wall-clock time and
-    return a counting summary.
+    """Process `source` and return a counting summary.
+
+    If ``duration > 0`` the source is processed for at most ``duration`` seconds
+    of wall-clock time. If ``duration <= 0`` there is no cap: every frame is
+    processed until the source is exhausted — the correct mode for offline
+    ingestion of finite clips (live-bets ``ingest-clip`` passes ``duration=0``).
+    Note a positive wall-clock cap makes the count depend on CPU speed, so it is
+    only appropriate for bounding live/unbounded streams.
 
     Headless: no display, no file writing. Used by external callers (live-bets
-    DetectionWorker). The CLI in `main()` does additional things (annotated
+    offline ingestion). The CLI in `main()` does additional things (annotated
     video, JSON output) and remains a separate code path.
 
     If `model_path` is None or empty, the bundled package weight
@@ -132,7 +138,12 @@ def count_vehicles_minframes(
                 for tid, cid in zip(ids, clss, strict=False):
                     counter.add(track_id=tid, class_id=cid)
             frame_count += 1
-            if _time.monotonic() - start >= duration:
+            # duration <= 0 means "no wall-clock cap": process every frame until
+            # the source is exhausted. This is the correct mode for offline
+            # ingestion of finite clips, where a positive cap would make the
+            # count depend on CPU speed (and `duration=0` would otherwise stop
+            # after a single frame).
+            if duration > 0 and _time.monotonic() - start >= duration:
                 break
     finally:
         cap.release()
@@ -161,7 +172,11 @@ def count_vehicles_linecrossing(
 
     Behaves like the line-crossing branch of the ``main()`` CLI but without
     rendering, file writing, or window handling — suitable for live-bets
-    DetectionWorker / library-style use.
+    offline ingestion / library-style use.
+
+    ``duration`` follows the same rule as ``count_vehicles_minframes``:
+    ``duration > 0`` caps wall-clock processing time; ``duration <= 0`` means
+    "no cap — process every frame until the source ends".
 
     If `model_path` is None or empty, the bundled package weight is resolved
     via ``importlib.resources`` (mirrors ``count_vehicles_minframes``).
@@ -209,7 +224,8 @@ def count_vehicles_linecrossing(
                         cx=int(cx), cy=int(cy),
                     )
             frame_count += 1
-            if _time.monotonic() - start >= duration:
+            # duration <= 0 means "no wall-clock cap" — see count_vehicles_minframes.
+            if duration > 0 and _time.monotonic() - start >= duration:
                 break
     finally:
         cap.release()
