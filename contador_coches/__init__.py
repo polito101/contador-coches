@@ -21,7 +21,7 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Re-export the public callables from the implementation module.
 # Lazy heavy imports (cv2, ultralytics) live inside the function bodies so

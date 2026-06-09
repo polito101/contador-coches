@@ -196,7 +196,13 @@ def count_vehicles_linecrossing(
     if not cap.isOpened():
         raise RuntimeError(f"could not open source: {source!r}")
 
-    counter = LineCrossingCounter(p1=p1, p2=p2)
+    # Read the container fps so crossings can be stamped with video-time
+    # ``at = frame_index / fps``. Same guard main() uses: only an absurd value
+    # (<=1 or >=120, e.g. 0.0 from a stream) falls back to 25.0.
+    fps_stream = cap.get(_cv2.CAP_PROP_FPS)
+    fps = fps_stream if 1.0 < fps_stream < 120.0 else 25.0
+
+    counter = LineCrossingCounter(p1=p1, p2=p2, fps=fps)
     vehicle_class_ids = list(VEHICLE_CLASSES.keys())
 
     start = _time.monotonic()
@@ -222,6 +228,7 @@ def count_vehicles_linecrossing(
                     counter.observe(
                         track_id=tid, class_id=cid,
                         cx=int(cx), cy=int(cy),
+                        frame_index=frame_count,
                     )
             frame_count += 1
             # duration <= 0 means "no wall-clock cap" — see count_vehicles_minframes.
@@ -235,6 +242,10 @@ def count_vehicles_linecrossing(
         "breakdown": counter.breakdown(),
         "frames_processed": frame_count,
         "duration_real": _time.monotonic() - start,
+        # Per-crossing decomposition of ``total`` (len(events) == total), each
+        # with video-time ``at`` for the live-bets timed replay. Additive key —
+        # the other four are byte-stable.
+        "events": counter.events,
     }
 
 
@@ -248,9 +259,22 @@ class LineCrossingCounter:
     one — independent of which way the user drew the segment.
     """
 
-    def __init__(self, p1: tuple[int, int], p2: tuple[int, int]) -> None:
+    def __init__(
+        self,
+        p1: tuple[int, int],
+        p2: tuple[int, int],
+        fps: float = 25.0,
+    ) -> None:
         if p1 == p2:
             raise ValueError("Segment endpoints must differ.")
+        # fps lets observe() stamp each crossing with its video-time
+        # ``at = frame_index / fps`` (seconds). Default 25.0 mirrors the
+        # main()/headless fallback so direct-construction callers still work.
+        self._fps = fps
+        # One event is appended per crossing (at the single _already_counted.add
+        # site), so ``len(events) == total()`` by construction — the events are
+        # the per-crossing decomposition of the same number ``total`` reports.
+        self.events: list[dict] = []
         # Normalize so direction labels don't depend on drag order.
         dx = p2[0] - p1[0]
         dy = p2[1] - p1[1]
@@ -291,7 +315,14 @@ class LineCrossingCounter:
         o4 = cls._orient(b1, b2, a2)
         return o1 != o2 and o3 != o4
 
-    def observe(self, track_id: int, class_id: int, cx: int, cy: int) -> None:
+    def observe(
+        self,
+        track_id: int,
+        class_id: int,
+        cx: int,
+        cy: int,
+        frame_index: int = 0,
+    ) -> None:
         name = VEHICLE_CLASSES.get(class_id)
         if name is None:
             return
@@ -312,6 +343,18 @@ class LineCrossingCounter:
             direction = "right" if side > 0 else "left"
         self._crossed[name][direction].add(track_id)
         self._already_counted.add(track_id)
+        # Record exactly ONE event per crossing, at this single counting site, so
+        # ``len(self.events) == self.total()`` by construction (the live-bets
+        # counter replays these to reach the same number settlement reads).
+        # ``at`` is video-time (frame_index / fps), NOT wall-clock.
+        self.events.append(
+            {
+                "at": round(frame_index / self._fps, 3),
+                "class": name,
+                "direction": direction,
+                "track_id": int(track_id),
+            }
+        )
 
     def total(self) -> int:
         return sum(
