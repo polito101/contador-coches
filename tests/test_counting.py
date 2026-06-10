@@ -44,12 +44,12 @@ def test_summary_dict_shape():
     summary = c.summary(
         source="test.mp4",
         duration_real=12.3,
-        model="yolov8n.pt",
+        model="yolo26x.pt",
     )
     assert summary["total"] == 2
     assert summary["source"] == "test.mp4"
     assert summary["duration_real"] == 12.3
-    assert summary["model"] == "yolov8n.pt"
+    assert summary["model"] == "yolo26x.pt"
     assert summary["breakdown"]["car"] == 1
     assert summary["breakdown"]["bus"] == 1
     assert set(summary["track_ids"]["car"]) == {1}
@@ -67,7 +67,7 @@ def test_parse_args_defaults():
     args = parse_args(["--source", "foo.mp4"])
     assert args.source == "foo.mp4"
     assert args.duration == 30.0
-    assert args.model == "yolov8n.pt"
+    assert args.model == "yolo26x.pt"
     assert args.output_dir == "output"
     assert args.no_save is False
     assert args.no_display is False

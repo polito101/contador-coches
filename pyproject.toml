@@ -1,6 +1,6 @@
 [project]
 name = "contador-coches"
-version = "0.1.0"
+version = "0.2.0"
 description = "YOLO + ByteTrack vehicle counter for live-bets"
 requires-python = ">=3.12"
 dependencies = [

@@ -66,7 +66,7 @@ class VehicleCounter:
 def count_vehicles_minframes(
     source: str | int,
     duration: float,
-    model_path: str | None = "yolov8n.pt",
+    model_path: str | None = "yolo26x.pt",
     min_frames: int = 5,
     conf: float = 0.5,
 ) -> dict:
@@ -83,10 +83,9 @@ def count_vehicles_minframes(
     offline ingestion). The CLI in `main()` does additional things (annotated
     video, JSON output) and remains a separate code path.
 
-    If `model_path` is None or empty, the bundled package weight
-    (``contador_coches/weights/yolov8n.pt``) is resolved via
-    ``importlib.resources``. Callers may still pass an explicit path to
-    override (e.g. for tests or alternate models).
+    If `model_path` is None or empty, the default ``yolo26x.pt`` is used
+    (auto-downloaded + cached by ultralytics on first use). Callers may still
+    pass an explicit path to override (e.g. for tests or alternate models).
 
     Returns:
         {
@@ -106,8 +105,9 @@ def count_vehicles_minframes(
     # Resolve the bundled default model path lazily — keeps importlib.resources
     # off the import-time path of the package (RESEARCH §3 Landmine).
     if not model_path:
-        from importlib.resources import files as _files
-        model_path = str(_files("contador_coches.weights") / "yolov8n.pt")
+        # yolo26x.pt is auto-downloaded + cached by ultralytics on first use
+        # (not bundled — ~118 MB exceeds GitHub's 100 MB/file limit).
+        model_path = "yolo26x.pt"
 
     model = _YOLO(model_path)
     cap = _cv2.VideoCapture(source)
@@ -161,7 +161,7 @@ def count_vehicles_linecrossing(
     duration: float,
     p1: tuple[int, int],
     p2: tuple[int, int],
-    model_path: str | None = "yolov8n.pt",
+    model_path: str | None = "yolo26x.pt",
     conf: float = 0.5,
 ) -> dict:
     """Headless line-crossing counter — sibling of `count_vehicles_minframes`.
@@ -188,8 +188,9 @@ def count_vehicles_linecrossing(
     from ultralytics import YOLO as _YOLO
 
     if not model_path:
-        from importlib.resources import files as _files
-        model_path = str(_files("contador_coches.weights") / "yolov8n.pt")
+        # yolo26x.pt is auto-downloaded + cached by ultralytics on first use
+        # (not bundled — ~118 MB exceeds GitHub's 100 MB/file limit).
+        model_path = "yolo26x.pt"
 
     model = _YOLO(model_path)
     cap = _cv2.VideoCapture(source)
@@ -394,8 +395,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="RTSP/HTTP URL or path to a video file.")
     p.add_argument("--duration", type=float, default=30.0,
                    help="Seconds of video to process (default: 30).")
-    p.add_argument("--model", default="yolov8n.pt",
-                   help="Ultralytics model weights (default: yolov8n.pt).")
+    p.add_argument("--model", default="yolo26x.pt",
+                   help="Ultralytics model weights (default: yolo26x.pt, auto-downloaded).")
     p.add_argument("--output-dir", default="output",
                    help="Where to write annotated video + JSON (default: output).")
     p.add_argument("--no-save", action="store_true",
