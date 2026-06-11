@@ -213,6 +213,14 @@ def count_vehicles_linecrossing(
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
+            if counter.frame_size is None and frame_count == 0:
+                # First frame: shape is (h, w, c) on real numpy frames. getattr
+                # guard: fake/opaque frames (tests) have no .shape — events
+                # then simply omit x/y. NEVER use CAP_PROP_FRAME_WIDTH: some
+                # containers report 0 and the test fake doesn't define it.
+                shape = getattr(frame, "shape", None)
+                if shape is not None and len(shape) >= 2 and shape[0] > 0 and shape[1] > 0:
+                    counter.frame_size = (int(shape[1]), int(shape[0]))
             results = model.track(
                 frame,
                 persist=True,
@@ -265,6 +273,7 @@ class LineCrossingCounter:
         p1: tuple[int, int],
         p2: tuple[int, int],
         fps: float = 25.0,
+        frame_size: tuple[int, int] | None = None,
     ) -> None:
         if p1 == p2:
             raise ValueError("Segment endpoints must differ.")
@@ -272,6 +281,12 @@ class LineCrossingCounter:
         # ``at = frame_index / fps`` (seconds). Default 25.0 mirrors the
         # main()/headless fallback so direct-construction callers still work.
         self._fps = fps
+        # (w, h) of the source frames. When known, observe() stamps each
+        # crossing event with the centroid normalized to 0..1 — the live-bets
+        # widget uses it to place the "+1" at the crossing point. None (the
+        # default, and any source whose frames lack .shape) simply omits the
+        # keys — additive, like `events` itself.
+        self.frame_size = frame_size
         # One event is appended per crossing (at the single _already_counted.add
         # site), so ``len(events) == total()`` by construction — the events are
         # the per-crossing decomposition of the same number ``total`` reports.
@@ -348,14 +363,18 @@ class LineCrossingCounter:
         # ``len(self.events) == self.total()`` by construction (the live-bets
         # counter replays these to reach the same number settlement reads).
         # ``at`` is video-time (frame_index / fps), NOT wall-clock.
-        self.events.append(
-            {
-                "at": round(frame_index / self._fps, 3),
-                "class": name,
-                "direction": direction,
-                "track_id": int(track_id),
-            }
-        )
+        event = {
+            "at": round(frame_index / self._fps, 3),
+            "class": name,
+            "direction": direction,
+            "track_id": int(track_id),
+        }
+        if self.frame_size is not None:
+            fw, fh = self.frame_size
+            if fw > 0 and fh > 0:
+                event["x"] = round(cx / fw, 4)
+                event["y"] = round(cy / fh, 4)
+        self.events.append(event)
 
     def total(self) -> int:
         return sum(

@@ -53,8 +53,14 @@ class _FakeResult:
         self.boxes = boxes
 
 
-def _fake_cv2_module(num_frames: int) -> types.ModuleType:
-    """A stand-in ``cv2`` whose ``VideoCapture`` yields exactly ``num_frames`` frames."""
+def _fake_cv2_module(num_frames: int, frame_shape: tuple | None = None) -> types.ModuleType:
+    """A stand-in ``cv2`` whose ``VideoCapture`` yields exactly ``num_frames`` frames.
+
+    ``frame_shape`` (h, w, c) opts into numpy-like frames exposing ``.shape`` —
+    used by the PLUS-ONE x/y wiring test. Default ``None`` keeps the legacy
+    opaque ``object()`` frames (no ``.shape``), pinning that the production
+    loop must tolerate shapeless frames.
+    """
 
     class _FakeCapture:
         def __init__(self, source) -> None:  # noqa: ANN001 - mirrors cv2 API
@@ -67,6 +73,8 @@ def _fake_cv2_module(num_frames: int) -> types.ModuleType:
             if self._remaining <= 0:
                 return False, None
             self._remaining -= 1
+            if frame_shape is not None:
+                return True, types.SimpleNamespace(shape=frame_shape)
             return True, object()  # opaque frame; the fake model never inspects it
 
         def get(self, prop):  # noqa: ANN001 - cv2 API
@@ -207,3 +215,36 @@ def test_linecrossing_duration_zero_processes_whole_clip(monkeypatch):
     assert result["frames_processed"] == num_frames
     assert result["total"] == 1
     assert result["breakdown"]["car"]["down"] == 1
+
+
+def test_linecrossing_events_carry_xy_from_first_frame_shape(monkeypatch):
+    """PLUS-ONE wiring: count_vehicles_linecrossing derives frame_size from the
+    FIRST frame's .shape, so the emitted events carry normalized x/y. The
+    legacy shapeless-frame path (other tests in this file) must keep working
+    and simply omits the keys."""
+    num_frames = 4
+    monkeypatch.setitem(
+        sys.modules, "cv2", _fake_cv2_module(num_frames, frame_shape=(360, 640, 3))
+    )
+
+    def boxes_for_call(i):
+        cy = 50 if i == 0 else 150  # above the line on frame 0, below it after
+        return _FakeBoxes(ids=[1], clss=[2], xywh=[(50, cy, 10, 10)])
+
+    monkeypatch.setitem(
+        sys.modules, "ultralytics", _fake_ultralytics_module(boxes_for_call)
+    )
+
+    result = count_vehicles_linecrossing(
+        source="fake.mp4",
+        duration=0.0,
+        p1=(0, 100),
+        p2=(200, 100),
+        model_path="ignored.pt",
+        conf=0.25,
+    )
+
+    assert result["total"] == 1
+    (ev,) = result["events"]
+    assert ev["x"] == round(50 / 640, 4)
+    assert ev["y"] == round(150 / 360, 4)
