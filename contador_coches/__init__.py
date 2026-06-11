@@ -24,6 +24,7 @@ from pathlib import Path
 # variant; unanimous decision 2026-06-10, same model for cars and birds). The
 # model change alters detection output for the same input, so this MUST be a
 # semver bump (it propagates a new indexer_version '+yolo26x' -> re-index).
+# v0.3.0 — additive x/y (normalized crossing centroid) per event when frame size is known.
 __version__ = "0.3.0"
 
 # Re-export the public callables from the implementation module.
