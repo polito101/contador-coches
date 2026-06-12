@@ -99,3 +99,47 @@ def test_recrossing_same_track_appends_one_event():
     assert c.total() == 1
     assert len(c.events) == 1
     assert c.events[0]["at"] == 0.3
+
+
+def test_events_carry_normalized_xy_when_frame_size_known():
+    """PLUS-ONE: with frame_size set, each event carries the crossing-frame
+    centroid normalized to 0..1 (4 decimals) — the live-bets widget uses it to
+    place the '+1' at the crossing point regardless of rendered video size."""
+    c = LineCrossingCounter(
+        p1=(0, 100), p2=(200, 100), fps=10.0, frame_size=(640, 360)
+    )
+    c.observe(track_id=1, class_id=2, cx=50, cy=80, frame_index=5)
+    c.observe(track_id=1, class_id=2, cx=55, cy=120, frame_index=6)
+    (ev,) = c.events
+    # The CROSSING frame's centroid (the second observe) is the recorded point.
+    assert ev["x"] == round(55 / 640, 4) == 0.0859
+    assert ev["y"] == round(120 / 360, 4) == 0.3333
+    assert 0.0 <= ev["x"] <= 1.0 and 0.0 <= ev["y"] <= 1.0
+
+
+def test_events_omit_xy_without_frame_size():
+    """Back-compat: no frame_size -> the keys are ABSENT (not null) so old
+    consumers and byte-stable expectations never see them."""
+    c = _drive_three_crossings()
+    for ev in c.events:
+        assert "x" not in ev and "y" not in ev
+
+
+def test_total_at_and_existing_fields_unchanged_by_frame_size():
+    """frame_size only ADDS keys — total / at / class / direction / track_id
+    are byte-identical to the frame_size-less drive."""
+    c = LineCrossingCounter(
+        p1=(0, 100), p2=(200, 100), fps=10.0, frame_size=(640, 360)
+    )
+    c.observe(track_id=1, class_id=2, cx=50, cy=80, frame_index=5)
+    c.observe(track_id=1, class_id=2, cx=55, cy=120, frame_index=6)
+    c.observe(track_id=2, class_id=3, cx=70, cy=70, frame_index=14)
+    c.observe(track_id=2, class_id=3, cx=75, cy=130, frame_index=15)
+    c.observe(track_id=3, class_id=5, cx=90, cy=150, frame_index=24)
+    c.observe(track_id=3, class_id=5, cx=95, cy=50, frame_index=25)
+    assert c.total() == 3
+    assert [e["at"] for e in c.events] == [0.6, 1.5, 2.5]
+    stripped = [
+        {k: v for k, v in e.items() if k not in ("x", "y")} for e in c.events
+    ]
+    assert stripped == _drive_three_crossings().events
